@@ -73,29 +73,36 @@ REPOSITORY LAYOUT
     .env / .env.example       MASTER_KEY and JWT_SECRET (never commit .env)
     README.md                 short quick-start
     docs/                     these files
-    scripts/                  e2e.py (87 live checks), seed scripts, webhook receiver
     backend/
       cmd/server/main.go      API process entry point
       cmd/vaultly/main.go     CLI
       internal/
-        api/                  HTTP handlers + middleware (the biggest package)
-        audit/                Kafka producer/consumer + subscriber hook
+        bootstrap/            builds every service and handler, starts the server and janitor
+        routes/               URL -> handler tables (auth, workspace, project, machine)
+        middleware/           CORS, security headers, user/service-token auth, rate limiting
+        httpx/ apperr/        response envelope, error kinds -> HTTP status, validation errors
+        principal/            who is calling (user, personal token or service token)
+
+        DOMAINS - each one has model, dto, errors, messages, repository, service, handler:
+        user/ org/ member/ invite/ project/ secret/ token/ webhook/ integration/ dynamic/ backup/
+        audit/                also the Kafka pipeline + activity-log reader
+        access/               roles and per-environment permission checks
+        keystore/             per-project data keys (cached unwrap)
+
         auth/                 passwords, JWT, refresh tokens
-        backup/               passphrase-sealed backup file format
         config/               environment configuration
         crypto/               envelope encryption + KeyProvider (local / OpenBao Transit)
         pii/                  field encryption + blind index for personal data
         db/                   connection + SQL migrations (embedded)
-        dynamic/              dynamic-secret provider (PostgreSQL)
-        integrations/         GitHub / Vercel / Railway providers
         mail/                 SMTP sender
-        ratelimit/            sliding-window limiter
-        webhook/              signed delivery with retries
+        ratelimit/            sliding-window limiter + client for the rate-limiter service
+        janitor/              periodic jobs (expired leases, expired-secret events)
+        pathutil/ slug/ tokenutil/ dberr/   small shared helpers
     frontend/
       src/                    React app (see 08_FRONTEND_GUIDE.txt)
       nginx.conf              static hosting + /api reverse proxy
 
 SIZE (approximate)
 ------------------
-  Go source (no tests)   ~6,100 lines      Go tests   ~840 lines (36 tests)
-  REST endpoints          66                SQL tables 18
+  Go source (no tests)   ~10,000 lines     Go tests   ~840 lines (36 tests)
+  REST endpoints          65                SQL tables 18

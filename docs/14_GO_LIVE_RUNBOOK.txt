@@ -1,0 +1,128 @@
+14 - GO-LIVE RUNBOOK  (put Vaultly on the internet for interviews and your resume)
+=================================================================================
+Goal: a public https:// link that works, is safe enough for a demo, and survives a reboot.
+Time: 3-5 hours the first time (most of it waiting for builds and DNS).
+
+WHAT IS ALREADY PREPARED IN THIS REPO
+  docker-compose.prod.yml   production stack. Only Caddy publishes ports (80/443). Postgres, Redis,
+                            Kafka, OpenBao and the API stay private. Passwords on Postgres/Redis,
+                            data volumes, log rotation, restart policies, health checks.
+  deploy/Caddyfile          automatic HTTPS (Let's Encrypt), HTTP->HTTPS, security headers incl. a
+                            strict Content-Security-Policy, /api -> backend, everything else -> UI
+  deploy/env.prod.example   the settings you fill in (copy to .env on the server)
+  deploy/backup.sh          database dump + OpenBao snapshot + unseal material, optionally encrypted
+  deploy/update.sh          git pull + rebuild + restart
+  .github/workflows/ci.yml  vet/test/build on every push (see file 15)
+
+WHAT WAS TESTED vs NOT TESTED
+  Tested on a laptop (throwaway project, DOMAIN=localhost, all containers rebuilt from scratch):
+    stack starts healthy; HTTPS works; HTTP redirects to HTTPS; security headers present; the session
+    cookie is Secure+HttpOnly+SameSite=Strict; the browser UI loads with ZERO content-security-policy
+    violations and fonts load; sign-up and login work through the proxy; no data-store ports are
+    published; backup.sh produces an encrypted archive containing the DB dump and OpenBao snapshot.
+  NOT tested (needs your real server): a real Let's Encrypt certificate, real DNS, behaviour on a
+    small-RAM VPS, surviving a server reboot, a restore from backup (outline only, see below).
+  Added after that test and NOT run as part of the full production stack: the ratelimiter and
+    ratelimiter-db services. They were tested separately (the service against a password-protected
+    Redis, and in the dev stack with the backend), and the compose file validates, but run
+    `docker compose -f docker-compose.prod.yml ps` on the server and confirm both are Up. They add
+    roughly 100-150 MB of RAM.
+
+STEP 1 - GET A SERVER  (~15 min)
+  Any Ubuntu 22.04/24.04 VPS with SSH access. Size: 2 vCPU / 4 GB RAM recommended; 2 GB works only
+  with swap (below) because Kafka and OpenBao are memory-hungry. Typical cost: roughly $5-12/month
+  (Hetzner, DigitalOcean, Vultr, Lightsail ...). Open ports 22, 80 and 443 in the provider firewall.
+  You do NOT need to buy a domain: use  <server-ip>.sslip.io  (e.g. 203.0.113.7.sslip.io) - it
+  resolves to your IP and Caddy can get a real certificate for it. A real domain looks nicer on a
+  resume: add an A record pointing to the server IP and wait for DNS (minutes to an hour).
+
+STEP 2 - PREPARE THE SERVER  (~10 min)
+  ssh root@SERVER_IP
+  curl -fsSL https://get.docker.com | sh                     # installs Docker + compose plugin
+  # only if the server has 2 GB RAM: add 2 GB swap
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  # firewall: only SSH + web
+  ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
+
+STEP 3 - GET THE CODE AND CONFIGURE  (~10 min)
+  git clone https://github.com/saravana-devx/vaultly.git && cd vaultly
+  # (if the repo is private, use a GitHub deploy key or a personal access token)
+  cp deploy/env.prod.example .env
+  # generate secrets and paste them into .env:
+  openssl rand -hex 32     # JWT_SECRET
+  openssl rand -hex 24     # POSTGRES_PASSWORD
+  openssl rand -hex 24     # REDIS_PASSWORD
+  nano .env                # set DOMAIN=...   leave MASTER_KEY empty on a fresh install
+  # SMTP is optional: without it, invitation emails are only logged and the admin still gets the link
+  # The rate-limiter service is built from its own GitHub repository during STEP 4. If that repository is
+  # private, clone it next to this one and set RATELIMITER_SRC in .env:
+  #   git clone git@github.com:saravana-devx/Distributed-rate-limiter.git ../Distributed-rate-limiter
+  #   echo 'RATELIMITER_SRC=../Distributed-rate-limiter' >> .env
+
+STEP 4 - START  (~10 min, mostly the first build)
+  docker compose -f docker-compose.prod.yml up -d --build
+  docker compose -f docker-compose.prod.yml ps        # wait ~90 s until backend shows (healthy)
+  The first start initialises OpenBao automatically; "waiting for OpenBao" in the backend log
+  for the first ~30 s is normal. The stack also starts `ratelimiter` and `ratelimiter-db`; if the
+  ratelimiter build fails with "repository not found", the repo is private - see the note in STEP 3.
+  Open https://YOUR_DOMAIN and sign up. The first account becomes the admin of its own workspace.
+
+STEP 5 - BACK UP IMMEDIATELY  (~10 min)  !! do not skip !!
+  BACKUP_PASSPHRASE='a long passphrase you will remember' sh deploy/backup.sh
+  scp root@SERVER_IP:vaultly/backups/*.enc .          # copy OFF the server, store it privately
+  Why: the project keys are wrapped by OpenBao. If the OpenBao volume is lost, every secret is
+  unrecoverable. The archive holds the database dump, the OpenBao snapshot and the unseal key.
+  Daily backups (optional):  crontab -e  ->
+     30 3 * * *  cd /root/vaultly && BACKUP_PASSPHRASE='...' sh deploy/backup.sh >> backups/cron.log 2>&1
+  (the backups stay on the same server unless you also copy them away)
+
+STEP 6 - VERIFY (checklist, ~20 min)
+  [ ] https://YOUR_DOMAIN shows the padlock and the landing page; http:// redirects to https://
+  [ ] Sign up, create a project, add a secret, reveal it, create a service token, then:
+        curl -H "Authorization: Bearer vst_..." "https://YOUR_DOMAIN/api/v1/secrets?recursive=true"
+  [ ] Audit log shows your actions; the Overview page loads
+  [ ] curl -sI https://YOUR_DOMAIN | grep -i -E "strict-transport|content-security|x-frame"
+  [ ] ss -tlnp   (on the server) shows ONLY 22, 80 and 443 listening publicly
+  [ ] REBOOT TEST: `reboot`, wait 2-3 minutes, reload the site. Everything should come back by
+      itself (OpenBao unseals through the bootstrap container). If not, see Troubleshooting.
+  [ ] `docker stats --no-stream` - memory is not at the limit (Kafka is capped at 512 MB heap)
+
+STEP 7 - MAKE IT PRESENTABLE  (see file 15)
+  Create one clean demo workspace (a project with ~8 secrets across dev/staging/prod, one service
+  token, one invited member). Keep it small: creating things live during the interview is more
+  convincing than a pre-filled app. Add the live URL to the GitHub README and to your resume.
+
+UPDATING LATER:   cd vaultly && sh deploy/update.sh
+STOPPING:         docker compose -f docker-compose.prod.yml down        (NEVER add -v)
+
+ROLLBACK
+  Code:  git log --oneline; git checkout <older commit>; sh deploy/update.sh   (then git checkout main)
+  Data restore (OUTLINE - not drilled yet; do one drill in week 1 of the plan):
+    1. Fresh server, same steps 1-4 but do not create users.
+    2. Stop the backend:  docker compose -f docker-compose.prod.yml stop backend
+    3. Put the OLD unseal-key and root-token (from the backup archive) into the baoboot volume,
+       restart openbao + openbao-bootstrap, then restore the snapshot:
+         bao operator raft snapshot restore -force /path/openbao.snap     (with the old root token)
+    4. Load the database:  gunzip -c postgres.sql.gz | docker compose -f docker-compose.prod.yml exec -T postgres psql -U vaultly vaultly
+    5. Start the backend. Log in and reveal a secret to confirm the keys still unwrap.
+
+SECURITY NOTES FOR A PUBLIC DEMO
+  - OpenBao unseals with ONE key stored on a server volume. This is demo-grade; say so if asked
+    (production: auto-unseal with a cloud KMS or Shamir shares held by people, TLS, multi-node).
+  - Sign-up is open. It is rate limited (10 per hour per IP) but anyone can create a workspace.
+    That is fine for a demo; do not store real secrets in it. You can stop/start the stack to pause it.
+  - Keep SSH key-only (disable password login) and keep the server updated (apt upgrade).
+  - Never commit the server's .env. Rotate JWT_SECRET if you suspect it leaked (everyone is logged out).
+
+TROUBLESHOOTING
+  Certificate not issued     ports 80/443 not open at the provider or ufw; DNS not pointing at the
+                             server yet; check:  docker compose -f docker-compose.prod.yml logs caddy
+  Site up but API errors     docker compose -f docker-compose.prod.yml logs backend
+  Backend keeps restarting   missing/empty JWT_SECRET, POSTGRES_PASSWORD or REDIS_PASSWORD in .env
+  Kafka or others killed     out of memory: `docker stats`, add swap (step 2) or use a 4 GB server
+  After reboot "waiting for OpenBao"   wait ~1 minute; check the bootstrap container is running:
+                             docker compose -f docker-compose.prod.yml logs openbao-bootstrap
+  Locked out by rate limit   wait the Retry-After seconds (login: 10 per minute per IP)
+  Rate limits not applied    docker compose -f docker-compose.prod.yml logs ratelimiter ; the backend logs
+                             "ratelimiter service unavailable" and uses its built-in limiter meanwhile

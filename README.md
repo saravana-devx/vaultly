@@ -27,6 +27,16 @@ docker run --rm --network vaultly_default \
   -v "$PWD/backend":/src:ro -v vaultly-gomod:/go/pkg -w /src golang:1.26-alpine go test ./...
 ```
 
+## Deploy (HTTPS on a single server)
+
+```bash
+cp deploy/env.prod.example .env      # fill in DOMAIN and the three generated secrets
+docker compose -f docker-compose.prod.yml up -d --build
+sh deploy/backup.sh                  # back up the database AND the OpenBao key service
+```
+
+Caddy gets a Let's Encrypt certificate automatically and only ports 80/443 are public. Full steps, checks and rollback: `docs/14_GO_LIVE_RUNBOOK.txt`. Plan for the next 2 days and 1 month: `docs/15_PLAN_2_DAYS_AND_1_MONTH.txt`.
+
 ## Features
 
 **Core** — register/login (JWT + rotating refresh cookie), workspaces, projects, environments, folders (paths), encrypted secrets, versions and rollback, rotation, `.env` import/export, service tokens, audit log (via Kafka), CLI, dashboard.
@@ -61,5 +71,5 @@ curl -XPOST -H "Authorization: Bearer $VAULTLY_TOKEN" $VAULTLY_URL/api/v1/dynami
 - **Integrations** push additions and updates only; deleting a secret in Vaultly does not delete it at the destination. The provider adapters are tested against mock servers, not the live GitHub/Vercel/Railway APIs.
 - **Dynamic secrets** support PostgreSQL only. `DROP OWNED` runs in the admin URL's database.
 - **Webhooks**: `WEBHOOK_ALLOW_PRIVATE=true` is set in `docker-compose.yml` for local testing — leave it unset in production.
-- Behind a reverse proxy, forwarded client IPs are trusted from private ranges only (`SetTrustedProxies` in `internal/api/server.go`). IP allowlists and rate limits depend on this.
+- Behind a reverse proxy, forwarded client IPs are trusted from private ranges only (`SetTrustedProxies` in `internal/bootstrap/app.go`). IP allowlists and rate limits depend on this.
 - Not built: production-hardened OpenBao (the demo unseals with one key on a Docker volume), multi-region/HA (infrastructure concern — the API is stateless, so run replicas behind a load balancer with managed Postgres/Redis/Kafka), SSO, E2EE, PAM, certificate management.

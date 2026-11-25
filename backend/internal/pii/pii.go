@@ -20,7 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/saravana/vaultly/internal/crypto"
+	"vaultly/internal/crypto"
 )
 
 const Prefix = "enc:v1:"

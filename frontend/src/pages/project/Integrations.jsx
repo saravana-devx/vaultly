@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
-import { Icon, Modal, ago } from '../../components/ui.jsx'
+import { Icon, Modal } from '../../components/ui.jsx'
+import { ask, toast } from '../../components/feedback.jsx'
+import { EmptyRow, EnvTag, Rel, RowMenu, StateDot, TableFoot, plural } from '../../components/table.jsx'
 
 const PROVIDERS = {
   github: {
@@ -17,7 +19,7 @@ const PROVIDERS = {
   },
 }
 
-export default function Integrations({ project, toast }) {
+export default function Integrations({ project }) {
   const pid = project.id
   const [list, setList] = useState(null)
   const [open, setOpen] = useState(false)
@@ -27,7 +29,7 @@ export default function Integrations({ project, toast }) {
 
   const sync = async (i) => {
     setBusy(i.id)
-    try { const r = await api(`/projects/${pid}/integrations/${i.id}/sync`, { method: 'POST' }); toast(`Pushed ${r.pushed} secret${r.pushed === 1 ? '' : 's'}${r.skipped?.length ? `, skipped ${r.skipped.length}` : ''}`) } catch (e) { toast(e.message) }
+    try { const r = await api(`/projects/${pid}/integrations/${i.id}/sync`, { method: 'POST', quiet: true }); toast(`Pushed ${r.pushed} secret${r.pushed === 1 ? '' : 's'}${r.skipped?.length ? `, skipped ${r.skipped.length}` : ''}`) } catch (e) { toast(e.message) }
     setBusy(''); load()
   }
 
@@ -37,21 +39,24 @@ export default function Integrations({ project, toast }) {
         <div className="muted" style={{ flex: 1 }}>Push secrets to the platforms that run your code. Credentials are encrypted at rest and never shown again.</div>
         <button className="btn primary" onClick={() => setOpen(true)}><Icon name="plus" size={15} /> Add integration</button>
       </div>
-      <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Source</th><th>Destination</th><th>Auto-sync</th><th>Last sync</th><th style={{ width: 160 }} /></tr></thead><tbody>
+      <div className="scroll-x"><table className="table"><thead><tr><th>Integration</th><th>Source</th><th>Destination</th><th>Auto-sync</th><th>Last sync</th><th style={{ width: 190 }} /></tr></thead><tbody>
         {(list || []).map((i) => (
           <tr key={i.id}>
-            <td style={{ fontWeight: 500 }}>{i.name}<div className="cm">{PROVIDERS[i.provider]?.name}</div></td>
-            <td><span className="chip static">{i.env}</span> <span className="mono muted" style={{ fontSize: 12.5 }}>{i.path}</span></td>
-            <td className="mono muted" style={{ fontSize: 12.5 }}>{i.config.repo || i.config.project_id || '—'}{i.config.environment ? ` · ${i.config.environment}` : ''}</td>
-            <td><label className="switch"><input type="checkbox" checked={i.auto_sync} onChange={async (e) => { await api(`/projects/${pid}/integrations/${i.id}`, { method: 'PATCH', body: { auto_sync: e.target.checked } }); load() }} /><i /></label></td>
-            <td>{i.last_synced_at ? <><span className={`dot-s ${i.last_status}`} /> {ago(i.last_synced_at)}{i.last_error && <div className="cm err" title={i.last_error}>{i.last_error}</div>}</> : <span className="muted">Never</span>}</td>
-            <td><div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <td><div className="c-main">{i.name}</div><div className="c-sub">{PROVIDERS[i.provider]?.name}</div></td>
+            <td><div className="state-line"><EnvTag slug={i.env} /><span className="mono dim" style={{ fontSize: 12.5 }}>{i.path}</span></div></td>
+            <td className="mono dim" style={{ fontSize: 12.5 }}>{i.config.repo || i.config.project_id || '—'}{i.config.environment ? ` · ${i.config.environment}` : ''}</td>
+            <td><label className="switch"><input type="checkbox" checked={i.auto_sync} aria-label={`Auto-sync ${i.name}`} onChange={async (e) => { await api(`/projects/${pid}/integrations/${i.id}`, { method: 'PATCH', body: { auto_sync: e.target.checked } }); load() }} /><i /></label></td>
+            <td>{i.last_synced_at ? (
+              <><StateDot tone={i.last_status === 'ok' ? 'ok' : 'bad'}>{i.last_status === 'ok' ? 'Synced' : 'Failed'}</StateDot>
+                <div className="c-sub"><Rel iso={i.last_synced_at} />{i.last_error && <span className="err" title={i.last_error}> · {i.last_error}</span>}</div></>
+            ) : <span className="dim">Never</span>}</td>
+            <td><div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
               <button className="btn sm" disabled={busy === i.id} onClick={() => sync(i)}>{busy === i.id ? 'Syncing…' : 'Sync now'}</button>
-              <button className="iconbtn danger" title="Remove" aria-label="Remove" onClick={async () => { if (confirm(`Remove ${i.name}? Secrets already pushed stay where they are.`)) { await api(`/projects/${pid}/integrations/${i.id}`, { method: 'DELETE' }); load() } }}><Icon name="trash" size={16} /></button>
+              <RowMenu items={[{ label: 'Remove integration', icon: 'trash', danger: true, run: async () => { if (await ask(`Remove ${i.name}? Secrets already pushed stay where they are.`, { confirm: 'Remove', danger: true })) { await api(`/projects/${pid}/integrations/${i.id}`, { method: 'DELETE' }); load() } } }]} />
             </div></td>
           </tr>))}
-        {list && !list.length && <tr><td colSpan="6" className="muted" style={{ textAlign: 'center', padding: 44 }}>No integrations yet. Add GitHub Actions, Vercel or Railway.</td></tr>}
-      </tbody></table></div>
+        {list && !list.length && <EmptyRow cols={6} icon="layers" title="No integrations yet" hint="Add GitHub Actions, Vercel or Railway." />}
+      </tbody></table><TableFoot>{plural((list || []).length, 'integration')}</TableFoot></div>
       <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>Syncs add and update values. Secrets deleted here are not removed from the destination.</p>
       {open && <AddIntegration project={project} onClose={() => setOpen(false)} onDone={() => { setOpen(false); load() }} />}
     </>

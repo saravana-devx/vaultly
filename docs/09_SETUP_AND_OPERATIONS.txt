@@ -57,15 +57,6 @@ TESTS (all in Docker)
     -e REDIS_URL=redis://redis:6379/0 \
     -e BAO_ADDR=http://openbao:8200 -e BAO_TOKEN_FILE=/token/app-token -v vaultly_baotoken:/token:ro \
     -v "$PWD/backend":/src:ro -v vaultly-gomod:/go/pkg -w /src golang:1.26-alpine go test ./...
-  # end-to-end (98 checks against the live stack; add E_EXPECT_BAO=1 to also check OpenBao wrapping; takes ~2 minutes because it waits for expiry
-  # and for the dynamic-secret janitor). Run from the vaultly/ directory:
-  E_EMAIL=you@example.com E_PW='your password' python3 scripts/e2e.py
-  The e2e script creates its own project and one throwaway user and deletes them at the end.
-
-DEMO DATA
-  scripts/seed_demo.py       projects, ~200 secrets, tokens (SEED_EMAIL, SEED_PASSWORD)
-  scripts/seed_features.py   tags, expiry, references, webhook, dynamic, integrations (E, P)
-  scripts/hookrx.py          tiny webhook receiver used by e2e and the demo webhook
 
 OPENBAO OPERATIONS
   Status:        docker compose exec openbao-bootstrap sh -c 'BAO_ADDR=http://openbao:8200 bao status'
@@ -89,9 +80,27 @@ TROUBLESHOOTING
   Webhook "address not allowed"   set WEBHOOK_ALLOW_PRIVATE=true (dev) or use a public URL
   Port already in use        stop the other process or change the published port in docker-compose.yml
 
-GOING TO PRODUCTION (checklist - not done for you)
+GOING TO PRODUCTION: use docker-compose.prod.yml and follow file 14 (the checklist below is the
+background reasoning).
+
+GOING TO PRODUCTION (checklist)
   - TLS termination (nginx/Caddy/load balancer) and HTTPS-only cookies
   - Managed Postgres/Redis/Kafka on a private network; don't publish their ports
   - Strong random MASTER_KEY/JWT_SECRET from a secret manager; plan for KMS
   - Remove WEBHOOK_ALLOW_PRIVATE; set CORS_ORIGINS and APP_URL to your domain
   - Real SMTP provider; backups scheduled and restore-tested; monitoring and log shipping
+
+RATE-LIMITER SERVICE (dev and production stacks)
+------------------------------------------------
+Both docker-compose.yml and docker-compose.prod.yml run two extra containers, `ratelimiter` and
+`ratelimiter-db`, built from the separate Distributed-rate-limiter project. The backend asks it for
+every rate-limit decision (RATELIMITER_URL=http://ratelimiter:8080) and falls back to its own Redis
+limiter if the service is down. Its admin API has no authentication, so its port is NOT published.
+Its one-table schema is deploy/ratelimiter/001_clients.sql (mounted into ratelimiter-db).
+Where the source comes from (RATELIMITER_SRC):
+  dev   default ../../Distributed-rate-limiter  (a sibling folder of this repo)
+  prod  default https://github.com/saravana-devx/Distributed-rate-limiter.git
+        If that repository is private, clone it next to this one on the server and set
+        RATELIMITER_SRC=../Distributed-rate-limiter in .env.
+To run without the service, remove RATELIMITER_URL (and the ratelimiter dependency) from the backend.
+See which policies exist:  docker compose exec ratelimiter-db psql -U ratelimiter -d ratelimiter -c 'select * from clients'

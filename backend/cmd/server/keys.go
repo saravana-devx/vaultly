@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/saravana/vaultly/internal/config"
-	"github.com/saravana/vaultly/internal/crypto"
-	"github.com/saravana/vaultly/internal/pii"
+	"vaultly/internal/config"
+	"vaultly/internal/crypto"
+	"vaultly/internal/pii"
 )
 
 // buildKeys selects the root of trust. With KEY_PROVIDER=openbao the wrapping key lives

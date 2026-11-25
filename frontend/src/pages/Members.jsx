@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Avatar, Modal, Icon, ago, copy, useToast } from '../components/ui.jsx'
+import { Avatar, Modal, Icon, copy } from '../components/ui.jsx'
+import { ask, toast } from '../components/feedback.jsx'
+import { EmptyRow, EnvTag, Rel, RowMenu, TableFoot, cap, plural } from '../components/table.jsx'
 
 const ENV_LEVELS = [['inherit', 'Same as workspace role'], ['none', 'No access'], ['viewer', 'Viewer (read only)'], ['developer', 'Developer (read & write)']]
 
@@ -27,7 +29,6 @@ export default function Members() {
   const [inviting, setInviting] = useState(params.get('invite') === '1')
   const [editing, setEditing] = useState(null)
   const [link, setLink] = useState(null)
-  const [toast, toastEl] = useToast()
   const admin = org?.role === 'admin'
   const load = () => {
     api(`/orgs/${orgId}/members`).then(setList)
@@ -35,56 +36,69 @@ export default function Members() {
     if (admin) api(`/orgs/${orgId}/invites`).then(setInvites)
   }
   useEffect(() => { load() }, [orgId, admin])
-  const act = async (fn) => { try { await fn(); load() } catch (x) { alert(x.message) } }
+  const act = async (fn) => { try { await fn(); load() } catch (x) { toast.error(x.message) } }
 
   return (
     <>
       <div className="head"><div><h1>Members</h1><p>Admins manage everything. Developers read and write secrets. Viewers are read-only. Limit anyone to specific environments.</p></div>
         {admin && <button className="btn primary" onClick={() => setInviting(true)}><Icon name="plus" size={15} /> Invite member</button>}</div>
-      <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Role</th><th>Environment access</th><th>Joined</th><th /></tr></thead><tbody>
+      <div className="scroll-x"><table className="table"><thead><tr><th>Member</th><th style={{ width: 170 }}>Role</th><th>Environment access</th><th style={{ width: 130 }}>Joined</th><th style={{ width: 56 }} /></tr></thead><tbody>
         {list.map((m) => {
-          const ov = Object.entries(m.env_roles || {})
+          const overrides = Object.entries(m.env_roles || {})
+          const self = m.id === user.id
           return (
             <tr key={m.id}>
-              <td><div style={{ display: 'flex', gap: 12, alignItems: 'center' }}><Avatar name={m.name} size={32} /><div><div style={{ fontWeight: 500 }}>{m.name}{m.id === user.id && <span className="muted"> (you)</span>}</div><div className="muted" style={{ fontSize: 13 }}>{m.email}</div></div></div></td>
+              <td>
+                <div className="who"><Avatar name={m.name} size={34} />
+                  <div><div className="c-main">{m.name}{self && <span className="you">You</span>}</div><div className="c-sub">{m.email}</div></div></div>
+              </td>
               <td>{admin ? (
-                <select className="input" style={{ width: 130, height: 32 }} value={m.role} aria-label={`Role for ${m.name}`}
+                <select className="rolesel" value={m.role} aria-label={`Role for ${m.name}`}
                   onChange={(e) => act(() => api(`/orgs/${orgId}/members/${m.id}`, { method: 'PATCH', body: { role: e.target.value } }))}>
                   <option value="admin">Admin</option><option value="developer">Developer</option><option value="viewer">Viewer</option></select>
-              ) : <span className={`tag ${m.role}`}>{m.role}</span>}</td>
-              <td>{m.role === 'admin' ? <span className="muted">All environments</span> : ov.length ? ov.map(([s, r]) => <span key={s} className={`chip static lvl-${r}`}>{s}: {r === 'none' ? 'no access' : r}</span>) : <span className="muted">Same as role</span>}
-                {admin && m.role !== 'admin' && <button className="btn sm ghost" style={{ marginLeft: 6 }} onClick={() => setEditing(m)}>Edit</button>}</td>
-              <td className="muted">{ago(m.joined_at)}</td>
-              <td style={{ textAlign: 'right' }}>{(admin || m.id === user.id) && (
-                <button className="btn sm ghost danger" onClick={() => confirm(m.id === user.id ? 'Leave this workspace?' : `Remove ${m.name}?`) &&
-                  act(async () => { await api(`/orgs/${orgId}/members/${m.id}`, { method: 'DELETE' }); if (m.id === user.id) reloadOrgs() })}>
-                  {m.id === user.id ? 'Leave' : 'Remove'}</button>)}</td>
+              ) : <span className="role">{m.role}</span>}</td>
+              <td>{m.role === 'admin' ? <span className="dim">All environments</span> : overrides.length ? (
+                <div className="envlist">{overrides.map(([slug, level]) => <span key={slug} className="envlvl"><EnvTag slug={slug} /><em className={level}>{level === 'none' ? 'No access' : cap(level)}</em></span>)}</div>
+              ) : <span className="dim">Same as role</span>}</td>
+              <td className="dim"><Rel iso={m.joined_at} /></td>
+              <td>
+                <RowMenu items={[
+                  admin && m.role !== 'admin' && { label: 'Edit environment access', icon: 'pencil', run: () => setEditing(m) },
+                  (admin || self) && { label: self ? 'Leave workspace' : 'Remove from workspace', icon: 'out', danger: true, run: async () => {
+                    const ok = await ask(self ? 'Leave this workspace? You will lose access to its projects.' : `Remove ${m.name} from this workspace?`, { confirm: self ? 'Leave' : 'Remove', danger: true })
+                    if (ok) act(async () => { await api(`/orgs/${orgId}/members/${m.id}`, { method: 'DELETE' }); if (self) reloadOrgs() })
+                  } },
+                ]} />
+              </td>
             </tr>)
         })}
-      </tbody></table></div>
+      </tbody></table><TableFoot>{plural(list.length, 'member')}</TableFoot></div>
 
       {admin && invites.length > 0 && (
         <section style={{ marginTop: 40 }}>
           <div className="sect"><h2>Pending invitations</h2></div>
-          <table className="table"><thead><tr><th>Email</th><th>Role</th><th>Invited by</th><th>Expires</th><th /></tr></thead><tbody>
+          <div className="scroll-x"><table className="table"><thead><tr><th>Email</th><th style={{ width: 150 }}>Role</th><th>Invited by</th><th style={{ width: 150 }}>Expires</th><th style={{ width: 56 }} /></tr></thead><tbody>
             {invites.map((i) => (
-              <tr key={i.id}><td>{i.email}</td><td><span className={`tag ${i.role}`}>{i.role}</span></td><td className="muted" style={{ fontSize: 13 }}>{i.invited_by}</td>
-                <td className="muted">{i.expired ? <span style={{ color: 'var(--danger)' }}>Expired</span> : new Date(i.expires_at).toLocaleDateString()}</td>
-                <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={() => act(() => api(`/orgs/${orgId}/invites/${i.id}`, { method: 'DELETE' }))}>Revoke</button></td></tr>))}
-          </tbody></table>
+              <tr key={i.id}>
+                <td className="c-main">{i.email}</td>
+                <td className="role">{i.role}</td>
+                <td className="dim">{i.invited_by}</td>
+                <td>{i.expired ? <span className="state bad"><i />Expired</span> : <span className="dim">{new Date(i.expires_at).toLocaleDateString()}</span>}</td>
+                <td><RowMenu items={[{ label: 'Revoke invitation', icon: 'trash', danger: true, run: () => act(() => api(`/orgs/${orgId}/invites/${i.id}`, { method: 'DELETE' })) }]} /></td>
+              </tr>))}
+          </tbody></table><TableFoot>{plural(invites.length, 'pending invitation')}</TableFoot></div>
         </section>
       )}
 
       {inviting && <Invite orgId={orgId} slugs={slugs} onClose={() => { setInviting(false); params.delete('invite'); setParams(params, { replace: true }) }} onDone={(r) => { setInviting(false); setLink(r); load() }} />}
-      {editing && <EditAccess orgId={orgId} member={editing} slugs={slugs} onClose={() => setEditing(null)} onDone={() => { setEditing(null); load(); toast('Access updated') }} />}
+      {editing && <EditAccess orgId={orgId} member={editing} slugs={slugs} onClose={() => setEditing(null)} onDone={() => { setEditing(null); load() }} />}
       {link && (
         <Modal title="Invitation sent" onClose={() => setLink(null)}>
           <p style={{ marginBottom: 12 }}>We emailed <b>{link.email}</b>. You can also share the link directly — it works once, for that email address, for 7 days.</p>
           <div className="tokenbox">{link.link}</div>
-          <div className="modal-actions"><button className="btn" onClick={async () => toast((await copy(link.link)) ? 'Link copied' : 'Copy failed')}>Copy link</button><button className="btn primary" onClick={() => setLink(null)}>Done</button></div>
+          <div className="modal-actions"><button className="btn" onClick={async () => copy(link.link, 'Link copied')}>Copy link</button><button className="btn primary" onClick={() => setLink(null)}>Done</button></div>
         </Modal>
       )}
-      {toastEl}
     </>
   )
 }

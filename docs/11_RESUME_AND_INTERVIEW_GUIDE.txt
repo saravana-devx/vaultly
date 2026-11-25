@@ -26,8 +26,8 @@ RESUME BULLETS  (every claim below is true and demonstrable in this repo)
     automatically at expiry by a background janitor, and when their project is deleted.
   - Shipped HMAC-signed webhooks with retries and SSRF protection, secret references with
     cycle detection, expiry, tags, cross-environment search, and encrypted backup/restore.
-  - Wrote 36 Go tests (including a live OpenBao test) plus a 98-check end-to-end suite; found and
-    fixed bugs it exposed (orphaned database roles on project delete, permission edge cases).
+  - Wrote 36 Go tests (including a live test against a real OpenBao) and a GitHub Actions CI
+    pipeline that runs formatting, vet, tests and the frontend build on every push.
 
 SHORT VERSION (2 lines)
   Secrets-management platform in Go/React with OpenBao-backed envelope encryption, PII encryption,
@@ -115,4 +115,4 @@ THINGS NOT TO CLAIM
   - Don't quote metrics you haven't measured (requests/second, latency, users).
 
 NUMBERS YOU CAN SAFELY QUOTE
-  66 REST endpoints | 18 tables | ~6.1k lines Go | 36 Go tests + 98 e2e checks | 9 containers
+  66 REST endpoints | 18 tables | ~6.1k lines Go | 36 Go tests | 9 containers (dev stack)

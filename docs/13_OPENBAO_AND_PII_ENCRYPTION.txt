@@ -111,8 +111,8 @@ What stays readable (on purpose)
   token names. Encrypting them would break search, filtering and the audit views.
 
 How the code uses it
-  api/users.go       loadUser, userIDByEmail (blind index), sealLabel/openLabel
-  api/auth.go        register stores sealed values; login looks up by Index(email), then bcrypt
+  user/service.go    Register stores sealed values; Login looks up by Index(email), then bcrypt;
+                     IDByEmail / EmailExists use the blind index
   audit.Service      seals before Kafka and before INSERT; opens before notifying subscribers
   pii.Backfill       idempotent startup migration, batched
   The HTTP API and the React app are unchanged: they still receive decrypted values.

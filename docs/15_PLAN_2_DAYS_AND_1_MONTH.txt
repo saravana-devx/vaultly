@@ -1,0 +1,160 @@
+15 - PLAN: 2 DAYS TO GO LIVE, THEN 1 MONTH OF LIGHT UPKEEP
+==========================================================
+GROUND RULES  (you decided these)
+  - This is a RESUME PROJECT, not a product. Nobody will use it; people will read and question it.
+  - FEATURE FREEZE. No new features from here on. Time goes to: a live link, tests/CI, understanding
+    the code, and one refactor. Every new feature is one more thing you must explain and maintain.
+  - If you cannot explain it in about 2 minutes, do not lead with it.
+
+THE STORY TO TELL  (lead with these six - they are the project)
+  1. Envelope encryption with an external key service (OpenBao), plus encrypted emails/names
+  2. Projects -> environments -> folders, with versioning and one-click rollback
+  3. Roles, per-environment access, and scoped machine tokens (one environment + path, optional IP)
+  4. Audit trail through Kafka, with a database fallback when Kafka is down
+  5. Redis + Lua sliding-window rate limiter
+  6. One-command Docker deployment, HTTPS, CI
+
+EXTRAS  (they exist; know ONE sentence for each; do not lead with them)
+  secret expiry          expired secrets stop being served to machines
+  tags + search          find secrets across paths and environments
+  references ${KEY}      one secret can point at another, cycle-safe
+  invitations            emailed single-use links; personal API tokens for scripts
+  webhooks               HMAC-signed callbacks with retries, SSRF-protected
+  dynamic secrets        short-lived Postgres logins that are dropped automatically at expiry
+  backup/restore         passphrase-encrypted export of a workspace
+  GitHub/Vercel/Railway  push secrets to those platforms (only tested against mock servers)
+
+OPTIONAL TRIM  (your call - ask me and I will do it; ~1-2 hours each, tests and docs included)
+  Fewer features = less to defend. Candidates, most-recommended first:
+   a) Remove GitHub/Vercel/Railway sync. It cannot be verified without real accounts, depends on three
+      external APIs you would have to keep working, and is the easiest claim to be caught on.
+      Touches: internal/integration, its route lines in internal/routes/project.go, the project "Integrations" tab.
+   b) Remove dynamic secrets. Impressive and tested, but PostgreSQL-only and another thing to explain.
+   c) Remove webhooks. Smaller; only if you want the leanest story.
+  The six core points above do not depend on any of these.
+
+====================================================================================================
+SECTION 1 - TODO: THE NEXT 2 DAYS   (goal: live link + you can explain it)
+====================================================================================================
+Assumes two full days = about 14-16 focused hours. If you only have ~8 hours, do ONLY the items
+marked with a star (*) - they are the minimum to be live and presentable.
+
+ALREADY DONE FOR YOU (verified here; see file 14 for exactly what was and was not tested)
+  - Production stack: docker-compose.prod.yml, Caddy HTTPS + security headers, backup.sh, update.sh
+  - GitHub Actions CI workflow (checked with actionlint; same commands pass locally; has not yet
+    run on GitHub - item 4 below)
+  - Go-live runbook (file 14), this plan, and the earlier docs 00-13
+
+DAY 1 (~7 h): understand it, prove it works, get CI green
+  1. [1 h] Run it and tour every page once.
+       docker compose up -d       then open http://localhost:3000, sign up, make a project, add a
+       secret, reveal it, make a service token, open the audit log. Read file 01.
+  2. [3 h] Trace three flows in the code. Write 5 lines per flow IN YOUR OWN WORDS in a private notes
+       file (outside the repo). Use files 02-04 as the map.
+       a. Login and refresh:  internal/user/handler.go -> service.go (Login, Refresh), internal/auth/auth.go
+          (NewRefreshToken, ConsumeRefreshToken), frontend/src/api.js (refreshSession)
+       b. Saving a secret:    internal/routes/project.go -> secret/handler.go Put -> service.go Put ->
+          access.NeedEnv (access/access.go) -> keystore.ProjectKey -> write -> repository Upsert ->
+          audit.Record; internal/crypto/crypto.go Encrypt
+       c. The rate limiter:   internal/ratelimit/lua/sliding_window.lua, sliding_window.go,
+          sliding_window_test.go, internal/middleware/middleware.go (Limit)
+     You are ready when you can explain each one at a whiteboard without opening the code.
+  3. [2 h]* YOUR CONTRIBUTION: write unit tests for pure functions that have no tests yet.
+     It teaches you the code, adds real value, and is NOT a feature. Create two files in
+     backend/internal/pathutil, internal/secret and internal/token (same package name as the code,
+     because the functions are unexported), table-driven, and run them:
+        docker run --rm -v "$PWD/backend":/src -v vaultly-gomod:/go/pkg -w /src golang:1.26-alpine \
+          go test -count=1 ./internal/pathutil/ ./internal/secret/ ./internal/token/
+     pathutil_test.go (pathutil.Norm / pathutil.Within), secret/validate_test.go (normTags),
+     secret/dotenv_test.go (parseDotenv, dotenvQuote). The cases below were checked against the
+     original functions, so they must pass (write normPath(...) as pathutil.Norm(...), and so on):
+        normPath("")            -> "/",  true         normPath("a/b")        -> "/a/b", true
+        normPath("//a///b/")    -> "/a/b", true       normPath(" /x ")       -> "/x", true
+        normPath("/a/../b")     -> rejected (ok=false)   normPath("/a/./b") -> rejected
+        normPath("/"+65 x's)    -> rejected (segment longer than 64)
+        within("/", "/x") true     within("/stripe", "/stripe") true     within("/stripe", "/stripe/live") true
+        within("/stripe", "/stripe2") FALSE (prefix match must respect the "/" boundary)
+        within("/stripe", "/") false
+        normTags(["#Mail"," ops ","mail"]) -> ["mail","ops"], true   (lowercase, trim, de-duplicate)
+        normTags(["has space"]) -> false          normTags(11 valid tags) -> false (max 10)
+        parseDotenv("# c\n\nexport A=1\nB=\"x y\"\nC='z'\nD=val # note\nE=\"a\\nb\"\nnoequals\nF=\n")
+            -> A=1, B="x y", C="z", D="val", E="a<newline>b", F=""   (comments/blank/no-"=" lines skipped)
+        dotenvQuote("plain") -> plain      dotenvQuote("a b") -> "a b" (quoted)
+        dotenvQuote(`a"b`) -> "a\"b" (escaped)      dotenvQuote("") -> (empty, unquoted)
+     token/network_test.go:
+        normCIDRs(["10.0.0.1"]) -> ["10.0.0.1/32"]     normCIDRs(["::1"]) -> ["::1/128"]
+        normCIDRs(["10.0.0.0/8"]) -> same              normCIDRs(["10.0.0.5/8"]) -> ["10.0.0.0/8"]
+        normCIDRs(["bad"]) -> false                    normCIDRs(21 addresses) -> false (max 20)
+        ipAllowed(nil, "1.2.3.4") true (empty list = any)    ipAllowed(["10.0.0.0/8"], "10.1.2.3") true
+        ipAllowed(["10.0.0.0/8"], "11.0.0.1") false          ipAllowed(["10.0.0.0/8"], "not-an-ip") false
+     Use `git checkout -b tests-pure-functions`, commit, push, open a pull request - that is also
+     practice for the CI step.
+  4. [1 h]* Push and watch CI. Read .github/workflows/ci.yml (three jobs: backend, frontend, compose).
+       git add -A && git status        # review what you are committing - these files are NEW and
+                                       # uncommitted: docker-compose.prod.yml, deploy/, .github/, docs/
+       git commit -m "Add production stack, CI and runbook" && git push
+     Then open the repository's "Actions" tab. If a job is red, read the log and fix it - that is the
+     learning. Add the CI status badge to the README when it is green.
+  5. [30 min] "Change it live" drills - DO NOT COMMIT, just practise (interviewers like this):
+       a. Lower the login limit to 5/min (internal/routes/auth.go, the m.Limit("login", ...) line); rebuild; see the 429
+       b. Make new projects start with only dev + prod (internal/project/model.go defaultEnvs)
+       c. Add a label for a new audit action in frontend/src/pages/Dashboard.jsx (the VERB map)
+       d. Shorten the access-token life to 5 minutes (internal/auth/auth.go AccessTTL)
+     For each: find the line, change it, rebuild (docker compose up -d --build backend|frontend),
+     see the effect, then `git checkout .` to undo.
+
+DAY 2 (~7-8 h): go live and make it presentable
+  6. [3-5 h]* DEPLOY. Follow file 14, steps 1-6. Do not improvise - the runbook is the tested path.
+  7. [1 h]*   Backup + reboot test (file 14, step 5 and the reboot item in step 6). Fix what breaks.
+  8. [2 h]*   Presentation:
+       - README: live URL, 3-4 screenshots (landing, dashboard, project, audit) with your email
+         removed, an architecture picture or the ASCII diagram from file 02, the CI badge
+       - A 60-90 second screen recording following the demo script in file 11
+       - Add a LICENSE (MIT), pin the repo on your GitHub profile
+       - Resume entry: bullets and numbers are in file 11
+  9. [30 min] Re-read "THINGS NOT TO CLAIM" in file 11 and rehearse the 30-second pitch aloud.
+ STOP HERE. Anything unfinished moves to the month plan.
+
+DONE WHEN (end of day 2)
+  [ ] https link works and survived a reboot       [ ] a backup exists AND is copied off the server
+  [ ] CI is green                                   [ ] README has screenshots + the live link
+  [ ] you can explain the six core points and trace one request through the code
+
+====================================================================================================
+SECTION 2 - FUTURE: THE NEXT 1 MONTH   (light upkeep, NO new features, ~5-8 h per week)
+====================================================================================================
+You can stop after any week. Each week removes one thing a reviewer could criticise.
+
+  Week 1 (~5 h)  Operate it
+    - Use the live site; fix anything you find. Add a free uptime ping (e.g. UptimeRobot) on /healthz.
+    - Do ONE real restore drill from your backup on a scratch server (file 14 "Rollback") and correct
+      the runbook where it was wrong. This turns "I have backups" into "I have restorable backups".
+    - Confirm the daily backup cron is running and copies are leaving the server.
+
+  Week 2 (~5-6 h)  Fix the migration weakness
+    - Replace "run every SQL file on every start" with a schema_migrations table that records which
+      numbered files were applied (backend/internal/db/db.go). Add a test. (3-5 h)
+    - Delete the dead CSS left from earlier iterations in frontend/src/styles.css. (1 h)
+
+  Week 3 (~8 h)  Show the layering pattern ONCE
+    - Refactor ONE small module (recommended: webhooks) from "handlers run SQL" into
+      handler -> service -> repository, with unit tests that use a fake repository.
+    - Leave the rest as it is. Say: "I refactored one module to show how I'd structure it; the rest
+      follows the same approach next." This directly answers the main design critique (file 04, K).
+
+  Week 4 (~6 h)  Tell the story
+    - Write one short post: "How Vaultly protects secrets with OpenBao envelope encryption".
+    - Re-record the demo with what you learned; update README and resume.
+    - Optional: extend the tests from the week-3 module.
+
+  TOTAL: roughly 25-30 hours across the month (or ~10 hours if you stop after week 2).
+
+NOT DOING  (feature freeze - list them under "Future work" in the README, one line each; do not build)
+  password reset, MFA, SSO, other database types for dynamic secrets, a durable job queue,
+  multi-region/HA, end-to-end encryption, automatic key rotation, rotating the personal-data keys.
+
+HOW TO WORK ON IT WHILE LEARNING
+  - One branch per task, small commits, run the tests before pushing, let CI check you.
+  - Read the test before the code; when you change behaviour, change or add a test.
+  - File 03 is the map ("where is X"), file 04 is the reasoning ("why is X like this").
+  - If something surprises you, add one line to your private notes - that becomes interview material.

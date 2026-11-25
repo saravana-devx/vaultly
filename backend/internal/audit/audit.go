@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/segmentio/kafka-go"
+
+	"vaultly/internal/principal"
 )
 
 type Event struct {
@@ -99,6 +101,24 @@ func (s *Service) notify(e Event) {
 			fn(e)
 		}()
 	}
+}
+
+// Record publishes an event on behalf of the caller (user, personal token or service token).
+func (s *Service) Record(ctx context.Context, a principal.Actor, orgID uuid.UUID, projectID *uuid.UUID, action, resource string, md map[string]any) {
+	if a.ViaPAT {
+		md = withKey(md, "via", "personal_token")
+	}
+	s.Publish(ctx, Event{OrgID: orgID, ProjectID: projectID, ActorType: a.Type(), ActorID: a.ID(), ActorLabel: a.Label(),
+		Action: action, Resource: resource, Metadata: md, IP: a.IP})
+}
+
+func withKey(md map[string]any, k string, v any) map[string]any {
+	out := make(map[string]any, len(md)+1)
+	for key, val := range md {
+		out[key] = val
+	}
+	out[k] = v
+	return out
 }
 
 // Publish never fails the caller.

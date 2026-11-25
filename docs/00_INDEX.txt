@@ -17,12 +17,14 @@ Doppler / HashiCorp Vault). Read these files in order the first time:
   11_RESUME_AND_INTERVIEW_GUIDE.txt  Resume bullets, talking points, likely questions
   12_REMAINING_WORK.txt       What is missing, and what you must do yourself
   13_OPENBAO_AND_PII_ENCRYPTION.txt  OpenBao key service + email/name encryption: design, ops, risks
+  14_GO_LIVE_RUNBOOK.txt      Put it on a server with HTTPS: step by step, verified parts, rollback
+  15_PLAN_2_DAYS_AND_1_MONTH.txt  THE ACTIVE PLAN: 2 days to go live, then 1 month of light upkeep
 
 Quick facts
 -----------
   Backend    Go 1.26, Gin, pgx, go-redis, kafka-go     (backend/)
   Frontend   React 18 + Vite + react-router            (frontend/)
   Data       PostgreSQL 16, Redis 7, Kafka 3.8 (KRaft), OpenBao 2.7 (key service)
-  Runs in    Docker Compose (9 containers)
+  Runs in    Docker Compose (dev: 9 containers; production stack: docker-compose.prod.yml)
   App URL    http://localhost:3000     API http://localhost:8080
   Mail (dev) http://localhost:8025 (Mailpit catches invite emails)

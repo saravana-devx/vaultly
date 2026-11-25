@@ -1,7 +1,14 @@
 06 - API REFERENCE
 ==================
 Base URL: /api   (through nginx: http://localhost:3000/api, direct: http://localhost:8080/api)
-JSON in/out. Errors: {"error": "message"} with a proper HTTP status.
+JSON in/out. Every JSON response uses one envelope and a proper HTTP status:
+  success  {"success": true,  "message": "Secret saved", "data": { ... }}    (data omitted when empty)
+  failure  {"success": false, "message": "Secret not found"}
+  invalid  {"success": false, "message": "Validation failed", "errors": [{"field","message"}]}
+The route lists below describe what is inside "data". Exceptions that are NOT wrapped:
+  GET /api/v1/secrets and GET .../secrets/export with format=dotenv|shell   plain text for shells/CI
+  POST /orgs/:org/backup                                                    the sealed .vbk file
+Deletes and updates return 200 with no data (earlier versions returned 204).
 
 AUTH HEADERS
   Users / scripts:  Authorization: Bearer <JWT access token>  or  Bearer vpt_<personal token>

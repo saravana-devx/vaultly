@@ -31,10 +31,14 @@ B. SLIDING-WINDOW RATE LIMITER   (internal/ratelimit)
      ZADD key now nonce ; PEXPIRE key window
      return {1, limit-count-1, oldest+window}
   Uses Redis's clock (not app servers') so multiple API instances agree.
-  Middleware fails OPEN on Redis errors (logs and allows) - availability over strictness.
+  Middleware fails OPEN if the limiter errors (availability over strictness).
   Keys: rl:<name>:<ip | userID | tokenID>.
+  With RATELIMITER_URL set (docker-compose does this), decisions come from the separate
+  Distributed-rate-limiter service (POST /api/v1/check with an X-API-Key per policy); the same Redis
+  holds its counters. ratelimit.Remote falls back to the local script if that service is down.
+  The service's admin API has no auth, so it is never published outside the Docker network.
 
-C. VERSIONED, TRANSACTIONAL WRITES   (api/secrets.go writeSecret)
+C. VERSIONED, TRANSACTIONAL WRITES   (secret/repository.go Upsert)
 ----------------------------------------------------------------
   BEGIN
     SELECT id,version,tags,expires_at FROM secrets WHERE env_id,path,key  FOR UPDATE
@@ -45,20 +49,20 @@ C. VERSIONED, TRANSACTIONAL WRITES   (api/secrets.go writeSecret)
   Tags/expiry carry over when the caller doesn't set them. Rollback = decrypt the old
   version and write it as a NEW version (history is append-only).
 
-D. PERMISSION RESOLUTION   (api/server.go + api/envroles.go)
+D. PERMISSION RESOLUTION   (internal/access)
 ------------------------------------------------------------
-  1. s.project(): join projects + memberships -> the caller's WORKSPACE role.
+  1. access.Project(): join projects + memberships -> the caller's WORKSPACE role.
      Not a member -> 404 (existence is not leaked).
-  2. s.envRole(slug): admin -> admin. Else look up member_env_roles(org,user,slug):
+  2. access.EnvRole(slug): admin -> admin. Else look up member_env_roles(org,user,slug):
      found -> that role (none|viewer|developer), not found -> workspace role.
      Overrides can both restrict AND grant (an admin decides).
-  3. needEnv(c, p, slug, need): compares ranks none<viewer<developer<admin.
-  Every secret handler: loads project with the minimum role "viewer", then calls
-  needEnv for the actual environment, because the environment decides.
+  3. access.NeedEnv(p, user, slug, need): compares ranks none<viewer<developer<admin.
+  Every secret service method: loads the project with the minimum role "viewer", then calls
+  NeedEnv for the actual environment, because the environment decides.
   Hidden environments are also filtered from getProject, search and reference
   resolution (the `allow` callback), so nothing leaks through side channels.
 
-E. SECRET REFERENCES   (api/secrets.go resolver)
+E. SECRET REFERENCES   (secret/resolver.go)
 ------------------------------------------------
   Syntax:  ${KEY}  ${/path/KEY}  ${env:/path/KEY}
   Relative KEY: look in the secret's own path, then in "/".
@@ -77,7 +81,7 @@ F. AUDIT PIPELINE   (internal/audit)
              FetchMessage -> INSERT ON CONFLICT DO NOTHING (retry until OK) ->
              CommitMessages -> notify(subscribers)
   Subscribe(fn) is a tiny observer pattern: the webhook Dispatcher.Handle and the
-  API's autoSync are registered in NewServer(). Subscribers recover from panics.
+  integration service's AutoSync are registered in bootstrap.New(). Subscribers recover from panics.
 
 G. WEBHOOK DELIVERY   (internal/webhook)
 ----------------------------------------
@@ -90,7 +94,7 @@ G. WEBHOOK DELIVERY   (internal/webhook)
   resolution; redirects are not followed. WEBHOOK_ALLOW_PRIVATE=true disables this (dev).
   Each delivery is stored; older than the latest 100 per hook are pruned.
 
-H. DYNAMIC SECRETS   (internal/dynamic + api/dynamic.go)
+H. DYNAMIC SECRETS   (internal/dynamic)
 --------------------------------------------------------
   Lease:  username = "v_" + 16 random [a-z0-9]; password = 32 random alphanumerics
           CREATE ROLE "u" LOGIN PASSWORD '...' VALID UNTIL '<expiry>'
@@ -101,7 +105,7 @@ H. DYNAMIC SECRETS   (internal/dynamic + api/dynamic.go)
   Janitor revokes expired leases every 20 s; deleting a project/environment revokes first.
   The admin connection URL is stored encrypted with the project key.
 
-I. BACKUP FORMAT   (internal/backup + api/backup.go)
+I. BACKUP FORMAT   (internal/backup)
 ----------------------------------------------------
   JSON {projects[{id, encrypted_dek, environments, secrets[{ciphertext, versions}]}]}
   -> gzip -> key = scrypt(passphrase, salt, N=32768,r=8,p=1) -> AES-256-GCM
@@ -124,7 +128,8 @@ J. DESIGN PATTERNS USED (where they genuinely apply)
   Strategy / interface + implementation   Limiter, Sender, Provider (integrations),
                                           dynamic.Provider, crypto.KeyProvider (Local/Transit/Hybrid)
   Observer                                audit.Subscribe
-  Dependency injection (constructor)      NewServer wires every collaborator
+  Dependency injection (constructor)      bootstrap.New wires every collaborator
+  Layered architecture                    handler -> service -> repository, per domain
   Middleware chain                        Gin: auth -> rate limit -> handler
   Envelope encryption                     Keyring
   Optimistic duplicate-safety             ON CONFLICT DO NOTHING (audit idempotency)
@@ -139,26 +144,25 @@ Good:
   - Concurrency is handled deliberately: row locks, atomic Lua, idempotent consumer.
 
 Weak spots - a strict reviewer WOULD flag these:
-  1. No repository/service layering. Handlers in internal/api build SQL and call it
-     directly ("transaction script" style). It is easy to read but you cannot unit-test
-     handlers without a database, and SQL is spread over many files.
-     A cleaner design: handler -> service (business rules) -> repository (SQL),
-     as the author's Distributed-rate-limiter project does.
-  2. `Server` is a "god struct" holding every dependency; the api package is large
-     (orgs.go 536 lines, secrets.go 793 lines) and mixes concerns.
+  1. Layering is in place (handler -> service -> repository per domain), but only the pure logic
+     has unit tests. Services depend on repository INTERFACES, so they can be tested with fakes;
+     nobody has written those tests yet, and no test exercises the HTTP layer.
+  2. Repositories return rows with sealed (encrypted) fields and services open them, so the
+     encryption concern appears in several services (pii.Box is injected where needed).
   3. Migrations are plain idempotent SQL with no schema_migrations version table,
      so you cannot do down-migrations or know the applied version.
   4. In-memory background state: webhook goroutines and the auto-sync debounce timers
      are lost on a crash/restart and are per-instance. A durable job queue (or a
      Kafka topic for deliveries) would fix this.
-  5. The only API-level tests are the live end-to-end script (scripts/e2e.py);
-     there are no Go tests for handlers, and no CI pipeline runs anything.
+  5. There are no Go tests for the HTTP handlers (the logic behind them - crypto, rate limiter,
+     webhooks, integrations, dynamic secrets, backup, PII - has unit tests). CI runs vet and the
+     existing tests, but nothing exercises the API end to end.
   6. Lists are not paginated (members, tokens, secrets in a folder).
   7. KEY SERVICE: OpenBao is supported, but the demo setup unseals with a single key stored on a
      Docker volume (dev convenience), runs one node without TLS, and PII keys cannot be rotated
      (only re-wrapped). MASTER_KEY remains as an optional legacy fallback.
   8. Rate-limit and IP-allowlist correctness depend on trusted-proxy configuration.
 
-Be able to say: "I kept the pluggable/security-critical code behind interfaces and
-tested it; the HTTP layer is deliberately simple, and the next step would be
-extracting a service+repository layer so handlers become unit-testable."
+Be able to say: "Each domain is handler -> service -> repository with interfaces between the
+layers, errors are typed and mapped to HTTP in one place, and every response uses one envelope.
+The security-critical code is tested; the next step is service tests with fake repositories."

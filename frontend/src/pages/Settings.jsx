@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, apiBlob, apiForm } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Modal, Icon, ago, copy, useToast } from '../components/ui.jsx'
+import { Modal, Icon, copy } from '../components/ui.jsx'
+import { ask, toast } from '../components/feedback.jsx'
+import { EmptyRow, Rel, RowMenu, TableFoot, plural } from '../components/table.jsx'
 
 export default function Settings() {
   const { org, orgId, user } = useAuth()
-  const [toast, toastEl] = useToast()
   return (
     <>
       <div className="head"><div><h1>Settings</h1><p>{user.email}</p></div></div>
-      <PersonalTokens toast={toast} />
-      {org?.role === 'admin' && <Backup orgId={orgId} orgName={org.name} toast={toast} />}
-      {toastEl}
+      <PersonalTokens />
+      {org?.role === 'admin' && <Backup orgId={orgId} orgName={org.name} />}
     </>
   )
 }
 
-function PersonalTokens({ toast }) {
+function PersonalTokens() {
   const [list, setList] = useState(null)
   const [open, setOpen] = useState(false)
   const [created, setCreated] = useState(null)
@@ -28,13 +28,17 @@ function PersonalTokens({ toast }) {
     <section className="block">
       <div className="sect"><div><h2>Personal access tokens</h2><small>Call the API as yourself, with your roles and environment access. Use them for scripts and local tooling.</small></div>
         <button className="btn" onClick={() => { setErr(''); setOpen(true) }}><Icon name="plus" size={15} /> New token</button></div>
-      <table className="table"><thead><tr><th>Name</th><th>Token</th><th>Expires</th><th>Last used</th><th /></tr></thead><tbody>
+      <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Token</th><th>Expires</th><th>Last used</th><th style={{ width: 56 }} /></tr></thead><tbody>
         {(list || []).map((t) => (
-          <tr key={t.id}><td style={{ fontWeight: 500 }}>{t.name}</td><td className="mono muted">{t.prefix}…</td>
-            <td className="muted">{t.expires_at ? new Date(t.expires_at).toLocaleDateString() : 'Never'}</td><td className="muted">{ago(t.last_used_at)}</td>
-            <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={async () => { if (confirm(`Revoke ${t.name}?`)) { await api(`/me/tokens/${t.id}`, { method: 'DELETE' }); load() } }}>Revoke</button></td></tr>))}
-        {list && !list.length && <tr><td colSpan="5" className="muted" style={{ textAlign: 'center', padding: 32 }}>No personal tokens.</td></tr>}
-      </tbody></table>
+          <tr key={t.id}>
+            <td className="c-main">{t.name}</td>
+            <td className="mono dim" style={{ fontSize: 12.5 }}>{t.prefix}…</td>
+            <td className="dim">{t.expires_at ? new Date(t.expires_at).toLocaleDateString() : 'Never'}</td>
+            <td className="dim"><Rel iso={t.last_used_at} /></td>
+            <td><RowMenu items={[{ label: 'Revoke token', icon: 'trash', danger: true, run: async () => { if (await ask(`Revoke ${t.name}?`, { confirm: 'Revoke', danger: true })) { await api(`/me/tokens/${t.id}`, { method: 'DELETE' }); load() } } }]} /></td>
+          </tr>))}
+        {list && !list.length && <EmptyRow cols={5} icon="key2" title="No personal tokens" hint="Create one to call the API from scripts as yourself." />}
+      </tbody></table><TableFoot>{plural((list || []).length, 'token')}</TableFoot></div>
       {open && (
         <Modal title="New personal access token" onClose={() => setOpen(false)}>
           <form onSubmit={async (e) => { e.preventDefault(); try { const d = await api('/me/tokens', { method: 'POST', body: { name: f.name, expire_days: +f.expire_days } }); setOpen(false); setCreated(d.token); load() } catch (x) { setErr(x.message) } }}>
@@ -50,14 +54,14 @@ function PersonalTokens({ toast }) {
           <div className="alert warn">Copy this token now — it won’t be shown again.</div>
           <div className="tokenbox">{created}</div>
           <p className="muted mono" style={{ fontSize: 12.5 }}>curl -H "Authorization: Bearer {created.slice(0, 10)}…" /api/orgs</p>
-          <div className="modal-actions"><button className="btn" onClick={async () => toast((await copy(created)) ? 'Copied' : 'Copy failed')}>Copy</button><button className="btn primary" onClick={() => setCreated(null)}>Done</button></div>
+          <div className="modal-actions"><button className="btn" onClick={async () => copy(created, 'Copied')}>Copy</button><button className="btn primary" onClick={() => setCreated(null)}>Done</button></div>
         </Modal>
       )}
     </section>
   )
 }
 
-function Backup({ orgId, orgName, toast }) {
+function Backup({ orgId, orgName }) {
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')

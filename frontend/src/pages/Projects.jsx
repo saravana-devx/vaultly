@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Avatar, Modal, Icon, ago } from '../components/ui.jsx'
+import { EnvTag } from '../components/table.jsx'
 
 export default function Projects() {
   const { orgId, org } = useAuth()
@@ -34,7 +35,7 @@ export default function Projects() {
           {shown.map((p) => (
             <Link to={`/app/projects/${p.id}`} key={p.id}>
               <span className="nm"><Avatar name={p.name} square size={28} /><span>{p.name}</span></span>
-              <span className="chips">{p.environments.slice(0, 3).map((e) => <i key={e.id}>{e.slug}</i>)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
+              <span className="chips">{p.environments.slice(0, 3).map((e) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
               <span className="num">{p.secret_count}</span>
               <span className="muted">{p.last_activity ? ago(p.last_activity) : ago(p.created_at)}</span>
               <Icon name="right" size={15} />

@@ -3,20 +3,18 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/saravana/vaultly/internal/api"
-	"github.com/saravana/vaultly/internal/audit"
-	"github.com/saravana/vaultly/internal/config"
-	"github.com/saravana/vaultly/internal/db"
-	"github.com/saravana/vaultly/internal/pii"
+	"vaultly/internal/audit"
+	"vaultly/internal/bootstrap"
+	"vaultly/internal/config"
+	"vaultly/internal/db"
+	"vaultly/internal/pii"
 )
 
 func main() {
@@ -70,17 +68,8 @@ func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	app := api.NewServer(cfg, pool, rdb, keys, box, a)
-	go app.RunJanitor(ctx)
-	srv := &http.Server{Addr: ":" + cfg.Port, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		log.Printf("vaultly api listening on :%s", cfg.Port)
-		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatal(err)
-		}
-	}()
-	<-ctx.Done()
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	srv.Shutdown(sctx)
+	app := bootstrap.New(bootstrap.Deps{Config: cfg, DB: pool, Redis: rdb, Keys: keys, PII: box, Audit: a})
+	if err := app.Run(ctx, log.Printf); err != nil {
+		log.Fatal(err)
+	}
 }

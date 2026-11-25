@@ -20,26 +20,23 @@ WHAT EXISTS
    backup        4   round trip; wrong passphrase/tamper fails; weak passphrase and foreign
                      files rejected; each seal is randomised
 
-2) End-to-end script - scripts/e2e.py, 98 checks against the LIVE stack
-   references (relative/absolute/cycle/cross-env) | tags, search, expiry (incl. waiting for
-   expiry) | token IP allowlist | invites with real email via Mailpit | per-environment roles
-   (hidden env, blocked write, search/export don't leak) | personal tokens | webhooks with a
-   real receiver container (signature verified, filtering, pause) | integrations CRUD and
-   credential encryption at rest | dynamic secrets against Postgres (login works, revoke works,
-   janitor expiry) | backup, wrong passphrase, delete project, restore, decrypt again |
-   encryption at rest (no plaintext email/name anywhere in a full pg_dump, blind-index login,
-   API still returns decrypted values, project keys wrapped by OpenBao)
+2) No end-to-end suite in the repo
+   During development the whole API was exercised by a throwaway end-to-end script (references,
+   expiry, invites, per-environment roles, webhooks, dynamic secrets, backup/restore, encryption at
+   rest). It was removed from the repository on purpose to keep the project small, so do NOT claim
+   it on a resume. What ships and can be re-run by anyone is the 36 Go tests above and the CI workflow.
 
 WHAT IS NOT TESTED  (say this honestly if asked)
 ------------------------------------------------
   - GitHub / Vercel / Railway adapters against the real services (only mock servers)
-  - Handlers in isolation (no Go handler tests; coverage comes from e2e)
+  - HTTP handlers (no Go handler tests, no end-to-end tests in the repo)
   - The React UI (no unit or browser tests; checked manually with screenshots)
   - Kafka failure/recovery paths beyond the fallback code path
   - Load/performance, multi-instance behaviour, TLS, a real SMTP provider
-  - No CI pipeline executes any of this automatically
+  - CI (GitHub Actions) runs gofmt, vet, the Go tests and the frontend build; it does not run the app
 
 HOW TO ADD A TEST
   Pure logic -> a *_test.go next to the package (see webhook_test.go for httptest use).
   Needs a database -> follow dynamic_test.go (skips if Postgres is unreachable).
-  New endpoint behaviour -> add a check() block to scripts/e2e.py.
+  New endpoint behaviour -> there is no API test harness; start with a package-level unit test, or
+  add handler tests with httptest as part of the refactor in file 15 (month plan, week 3).

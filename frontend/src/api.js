@@ -1,3 +1,7 @@
+import { toast } from './components/feedback.jsx'
+
+// Every JSON response is { success, message, data }. api() returns `data`, and shows the
+// server's message as a toast after a successful write (pass quiet: true to opt out).
 // Access token lives in memory only; the refresh token is an httpOnly cookie.
 let accessToken = null
 let refreshing = null
@@ -15,7 +19,7 @@ export async function refreshSession() {
   refreshing ||= raw('/auth/refresh', { method: 'POST', auth: false })
     .then(async (r) => {
       if (!r.ok) return null
-      const d = await r.json()
+      const d = (await r.json()).data
       accessToken = d.access_token
       return d.user
     })
@@ -35,23 +39,29 @@ export async function api(path, opts = {}) {
   }
   if (r.status === 204) return null
   const ct = r.headers.get('content-type') || ''
-  const data = ct.includes('json') ? await r.json() : await r.text()
-  if (!r.ok) throw new ApiError(r.status, data?.error || 'Something went wrong')
-  return data
+  if (!ct.includes('json')) {
+    const text = await r.text()
+    if (!r.ok) throw new ApiError(r.status, 'Something went wrong')
+    return text
+  }
+  const body = await r.json()
+  if (!r.ok) throw new ApiError(r.status, body.message || 'Something went wrong')
+  if (opts.method && opts.method !== 'GET' && !opts.quiet && body.message) toast(body.message)
+  return body.data ?? null
 }
 
 export const authApi = {
   login: async (email, password) => {
-    const d = await api('/auth/login', { method: 'POST', body: { email, password }, auth: false })
+    const d = await api('/auth/login', { method: 'POST', body: { email, password }, auth: false, quiet: true })
     accessToken = d.access_token
     return d.user
   },
   register: async (body) => {
-    const d = await api('/auth/register', { method: 'POST', body, auth: false })
+    const d = await api('/auth/register', { method: 'POST', body, auth: false, quiet: true })
     accessToken = d.access_token
     return d.user
   },
-  logout: async () => { await api('/auth/logout', { method: 'POST', auth: false }).catch(() => {}); accessToken = null },
+  logout: async () => { await api('/auth/logout', { method: 'POST', auth: false, quiet: true }).catch(() => {}); accessToken = null },
 }
 
 async function authed(path, init) {
@@ -63,13 +73,13 @@ async function authed(path, init) {
 
 export async function apiBlob(path, body) {
   const r = await authed(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  if (!r.ok) throw new ApiError(r.status, (await r.json().catch(() => ({}))).error || 'Something went wrong')
+  if (!r.ok) throw new ApiError(r.status, (await r.json().catch(() => ({}))).message || 'Something went wrong')
   return r.blob()
 }
 
 export async function apiForm(path, form) {
   const r = await authed(path, { method: 'POST', body: form })
   const d = await r.json().catch(() => ({}))
-  if (!r.ok) throw new ApiError(r.status, d.error || 'Something went wrong')
-  return d
+  if (!r.ok) throw new ApiError(r.status, d.message || 'Something went wrong')
+  return d.data ?? null
 }

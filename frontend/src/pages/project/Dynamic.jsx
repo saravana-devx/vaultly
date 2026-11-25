@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { Icon, Menu, Modal, ago, copy } from '../../components/ui.jsx'
+import { ask, toast } from '../../components/feedback.jsx'
+import { EmptyRow, EnvTag, Rel, RowMenu, StateDot, TableFoot, plural } from '../../components/table.jsx'
 
 const fmtTTL = (s) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`)
 const left = (iso) => {
@@ -9,7 +11,7 @@ const left = (iso) => {
   return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m left` : s >= 60 ? `${Math.floor(s / 60)}m left` : `${s}s left`
 }
 
-export default function Dynamic({ project, toast }) {
+export default function Dynamic({ project }) {
   const pid = project.id
   const [list, setList] = useState(null)
   const [open, setOpen] = useState(false)
@@ -19,7 +21,7 @@ export default function Dynamic({ project, toast }) {
   useEffect(() => { load() }, [pid])
 
   const generate = async (d) => {
-    try { setLease({ cfg: d, ...(await api(`/projects/${pid}/dynamic/${d.id}/lease`, { method: 'POST', body: {} })) }); load() } catch (e) { toast(e.message) }
+    try { setLease({ cfg: d, ...(await api(`/projects/${pid}/dynamic/${d.id}/lease`, { method: 'POST', body: {}, quiet: true })) }); load() } catch (e) { toast(e.message) }
   }
   return (
     <>
@@ -27,24 +29,24 @@ export default function Dynamic({ project, toast }) {
         <div className="muted" style={{ flex: 1 }}>Generate database credentials on demand. Each one is unique, expires automatically, and is deleted from the database when it does.</div>
         <button className="btn primary" onClick={() => setOpen(true)}><Icon name="plus" size={15} /> New dynamic secret</button>
       </div>
-      <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Environment</th><th>Target</th><th>Lifetime</th><th>Active</th><th style={{ width: 190 }} /></tr></thead><tbody>
+      <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Environment</th><th>Target</th><th>Lifetime</th><th>Active</th><th style={{ width: 230 }} /></tr></thead><tbody>
         {(list || []).map((d) => (
           <tr key={d.id}>
-            <td style={{ fontWeight: 500 }}>{d.name}<div className="cm">PostgreSQL</div></td>
-            <td><span className="chip static">{d.env}</span></td>
-            <td className="mono muted" style={{ fontSize: 12.5 }}>{d.target.admin_user}@{d.target.host}/{d.target.database}</td>
-            <td className="muted">{fmtTTL(d.default_ttl_s)} <span style={{ opacity: .7 }}>(max {fmtTTL(d.max_ttl_s)})</span></td>
-            <td>{d.active_leases}</td>
-            <td><div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <td><div className="c-main">{d.name}</div><div className="c-sub">PostgreSQL</div></td>
+            <td><EnvTag slug={d.env} /></td>
+            <td className="mono dim" style={{ fontSize: 12.5 }}>{d.target.admin_user}@{d.target.host}/{d.target.database}</td>
+            <td className="dim">{fmtTTL(d.default_ttl_s)} <span style={{ opacity: .7 }}>(max {fmtTTL(d.max_ttl_s)})</span></td>
+            <td>{d.active_leases ? <StateDot tone="ok">{d.active_leases}</StateDot> : <span className="dim">None</span>}</td>
+            <td><div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
               <button className="btn sm" onClick={() => generate(d)}>Generate credentials</button>
-              <Menu items={[
-                { label: 'Leases', icon: 'history', run: () => setLeases(d) },
-                { label: 'Delete', icon: 'trash', danger: true, run: async () => { if (confirm(`Delete ${d.name}? All active credentials are revoked.`)) { await api(`/projects/${pid}/dynamic/${d.id}`, { method: 'DELETE' }); load() } } },
+              <RowMenu items={[
+                { label: 'View leases', icon: 'history', run: () => setLeases(d) },
+                { label: 'Delete', icon: 'trash', danger: true, run: async () => { if (await ask(`Delete ${d.name}? All active credentials are revoked.`, { confirm: 'Delete', danger: true })) { await api(`/projects/${pid}/dynamic/${d.id}`, { method: 'DELETE' }); load() } } },
               ]} />
             </div></td>
           </tr>))}
-        {list && !list.length && <tr><td colSpan="6" className="muted" style={{ textAlign: 'center', padding: 44 }}>No dynamic secrets yet.</td></tr>}
-      </tbody></table></div>
+        {list && !list.length && <EmptyRow cols={6} icon="key2" title="No dynamic secrets yet" hint="Create one to hand out short-lived database credentials." />}
+      </tbody></table><TableFoot>{plural((list || []).length, 'dynamic secret')}</TableFoot></div>
       {list?.length > 0 && <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>From CI or an app, use a service token: <span className="mono">POST /api/v1/dynamic/{list[0].name}/lease</span></p>}
       {open && <AddDynamic project={project} onClose={() => setOpen(false)} onDone={() => { setOpen(false); load() }} />}
       {lease && (
@@ -52,11 +54,11 @@ export default function Dynamic({ project, toast }) {
           <div className="alert warn">This password won’t be shown again. It expires {new Date(lease.expires_at).toLocaleString()} ({left(lease.expires_at)}).</div>
           {[['Username', lease.username], ['Password', lease.password], ['Connection URL', lease.connection_url]].map(([k, v]) => (
             <div className="field" key={k}><label>{k}</label>
-              <div style={{ display: 'flex', gap: 8 }}><input className="input mono" readOnly value={v} onFocus={(e) => e.target.select()} /><button type="button" className="btn" onClick={async () => toast((await copy(v)) ? `${k} copied` : 'Copy failed')}>Copy</button></div></div>))}
+              <div style={{ display: 'flex', gap: 8 }}><input className="input mono" readOnly value={v} onFocus={(e) => e.target.select()} /><button type="button" className="btn" onClick={async () => copy(v, `${k} copied`)}>Copy</button></div></div>))}
           <div className="modal-actions"><button className="btn primary" onClick={() => setLease(null)}>Done</button></div>
         </Modal>
       )}
-      {leases && <Leases pid={pid} cfg={leases} onClose={() => { setLeases(null); load() }} toast={toast} />}
+      {leases && <Leases pid={pid} cfg={leases} onClose={() => { setLeases(null); load() }} />}
     </>
   )
 }
@@ -88,7 +90,7 @@ function AddDynamic({ project, onClose, onDone }) {
   )
 }
 
-function Leases({ pid, cfg, onClose, toast }) {
+function Leases({ pid, cfg, onClose }) {
   const [rows, setRows] = useState(null)
   const load = () => api(`/projects/${pid}/dynamic/${cfg.id}/leases`).then(setRows)
   useEffect(() => { load() }, [])
@@ -97,9 +99,9 @@ function Leases({ pid, cfg, onClose, toast }) {
       <table className="table"><thead><tr><th>Role</th><th>State</th><th>Created by</th><th>Expires</th><th /></tr></thead><tbody>
         {(rows || []).map((l) => (
           <tr key={l.id}><td className="mono" style={{ fontSize: 12.5 }}>{l.username}</td>
-            <td><span className={`tag ${l.state === 'active' ? 'admin' : ''}`}>{l.state}</span>{l.revoke_error && <div className="cm err" title={l.revoke_error}>revoke failed</div>}</td>
+            <td><StateDot tone={l.state === 'active' ? 'ok' : l.state === 'revoked' ? 'idle' : 'warn'}>{l.state[0].toUpperCase() + l.state.slice(1)}</StateDot>{l.revoke_error && <div className="c-sub err" title={l.revoke_error}>revoke failed</div>}</td>
             <td className="muted" style={{ fontSize: 13 }}>{l.created_by}</td><td className="muted">{l.state === 'active' ? left(l.expires_at) : ago(l.revoked_at || l.expires_at)}</td>
-            <td style={{ textAlign: 'right' }}>{l.state !== 'revoked' && <button className="btn sm ghost danger" onClick={async () => { try { await api(`/projects/${pid}/dynamic/${cfg.id}/leases/${l.id}`, { method: 'DELETE' }); toast('Revoked'); load() } catch (e) { toast(e.message) } }}>Revoke now</button>}</td></tr>))}
+            <td style={{ textAlign: 'right' }}>{l.state !== 'revoked' && <button className="btn sm ghost danger" onClick={async () => { try { await api(`/projects/${pid}/dynamic/${cfg.id}/leases/${l.id}`, { method: 'DELETE' }); load() } catch (e) { toast(e.message) } }}>Revoke now</button>}</td></tr>))}
         {rows && !rows.length && <tr><td colSpan="5" className="muted" style={{ textAlign: 'center', padding: 32 }}>No credentials generated yet.</td></tr>}
       </tbody></table>
       <div className="modal-actions"><button className="btn" onClick={onClose}>Close</button></div>

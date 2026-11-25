@@ -71,8 +71,8 @@ JWT_SECRET=`}<span className="t-y">•••••••••••••••
 
       <section className="lp-strip">
         <div className="lp-wrap">
-          <p>Works anywhere you can set an environment variable.</p>
-          <ul><li>Node.js</li><li>Go</li><li>Python</li><li>Docker</li><li>Kubernetes</li><li>GitHub Actions</li><li>GitLab CI</li></ul>
+          <p>Any language, any script, through the CLI or REST API.</p>
+          <ul><li>Node.js</li><li>Go</li><li>Python</li><li>Docker</li><li>Bash</li></ul>
         </div>
       </section>
 

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { Avatar, Icon, ago, shortName } from '../components/ui.jsx'
+import { EnvTag } from '../components/table.jsx'
 
 const VERB = {
   'secret.create': 'created', 'secret.update': 'updated', 'secret.read': 'revealed', 'secret.delete': 'deleted', 'secret.rotate': 'rotated',
@@ -130,7 +131,7 @@ export default function Dashboard() {
                 {(projects || []).slice(0, 6).map((p) => (
                   <Link to={`/app/projects/${p.id}`} key={p.id} className="prow">
                     <span className="nm"><Avatar name={p.name} square size={24} /><span>{p.name}</span></span>
-                    <span className="chips">{p.environments.slice(0, 3).map((e) => <i key={e.id}>{e.slug}</i>)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
+                    <span className="chips">{p.environments.slice(0, 3).map((e) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
                     <span className="sc"><b>{p.secret_count}</b><u><i style={{ width: `${(p.secret_count / maxSecrets) * 100}%` }} /></u></span>
                     <span className="muted">{p.last_activity ? ago(p.last_activity) : '—'}</span>
                   </Link>))}

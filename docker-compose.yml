@@ -11,6 +11,43 @@ services:
     ports: ["6379:6379"]
     healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 20 }
 
+  # Distributed-rate-limiter, built from its source (read-only) and used by the backend for every
+  # rate-limit decision. Internal only: its admin API has no auth, so never publish its port.
+  ratelimiter-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: ratelimiter, POSTGRES_USER: ratelimiter, POSTGRES_PASSWORD: ratelimiter }
+    volumes:
+      - ./deploy/ratelimiter:/docker-entrypoint-initdb.d:ro
+      - ratelimiterdata:/var/lib/postgresql/data
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ratelimiter -d ratelimiter"], interval: 3s, retries: 20 }
+
+  ratelimiter:
+    build:
+      context: ${RATELIMITER_SRC:-../../Distributed-rate-limiter}
+      dockerfile_inline: |
+        FROM golang:1.26-alpine AS build
+        WORKDIR /src
+        COPY go.mod go.sum ./
+        RUN go mod download
+        COPY . .
+        RUN CGO_ENABLED=0 go build -o /out/ratelimiter ./cmd/server
+        FROM alpine:3.20
+        WORKDIR /app
+        RUN touch .env
+        COPY --from=build /out/ratelimiter /usr/local/bin/ratelimiter
+        CMD ["ratelimiter"]
+    environment:
+      POSTGRES_HOST: ratelimiter-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ratelimiter
+      POSTGRES_PASSWORD: ratelimiter
+      POSTGRES_DB: ratelimiter
+      REDIS_ADDR: redis:6379
+      SERVER_PORT: "8080"
+    depends_on:
+      ratelimiter-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
   kafka:
     image: apache/kafka:3.8.0
     ports: ["9094:9094"]
@@ -76,11 +113,13 @@ services:
       BAO_TOKEN_FILE: /token/app-token
       DATABASE_URL: postgres://vaultly:vaultly@postgres:5432/vaultly?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      RATELIMITER_URL: http://ratelimiter:8080
       KAFKA_BROKERS: kafka:9092
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      ratelimiter: { condition: service_started }
       kafka: { condition: service_started }
       mailpit: { condition: service_started }
       openbao-bootstrap: { condition: service_started }
@@ -98,3 +137,4 @@ volumes:
   baodata:
   baoboot:
   baotoken:
+  ratelimiterdata:

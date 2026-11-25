@@ -1,4 +1,4 @@
-module github.com/saravana/vaultly
+module vaultly
 
 go 1.26.0
 

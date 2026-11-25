@@ -10,6 +10,7 @@ import Members from './pages/Members.jsx'
 import Audit from './pages/Audit.jsx'
 import Settings from './pages/Settings.jsx'
 import Invite from './pages/Invite.jsx'
+import { ConfirmHost, Toaster } from './components/feedback.jsx'
 
 function Private({ children }) {
   const { user, loading } = useAuth()
@@ -28,6 +29,7 @@ function Public({ children }) {
 export default function App() {
   const { user, loading } = useAuth()
   return (
+    <>
     <Routes>
       <Route path="/" element={loading ? <div className="splash"><div className="spinner" /></div> : <Landing signedIn={!!user} />} />
       <Route path="/login" element={<Public><Login /></Public>} />
@@ -43,5 +45,8 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    <Toaster />
+    <ConfirmHost />
+    </>
   )
 }

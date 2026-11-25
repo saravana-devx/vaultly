@@ -26,6 +26,7 @@ type Config struct {
 	SMTPFrom string
 
 	WebhookAllowPrivate bool
+	RateLimiterURL      string
 
 	KeyProvider  string // local | openbao
 	BaoAddr      string
@@ -52,6 +53,7 @@ func Load() (*Config, error) {
 		SMTPFrom:    get("SMTP_FROM", "no-reply@vaultly.local"),
 
 		WebhookAllowPrivate: os.Getenv("WEBHOOK_ALLOW_PRIVATE") == "true",
+		RateLimiterURL:      os.Getenv("RATELIMITER_URL"),
 
 		KeyProvider:  strings.ToLower(get("KEY_PROVIDER", "local")),
 		BaoAddr:      os.Getenv("BAO_ADDR"),

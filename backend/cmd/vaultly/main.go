@@ -43,13 +43,17 @@ func main() {
 	}
 	switch cmd {
 	case "pull":
-		fmt.Print(string(get(path, format, true)))
+		out := get(path, format, true)
+		if format == "json" {
+			out = data(out)
+		}
+		fmt.Print(string(out))
 	case "run":
 		if len(rest) == 0 {
 			usage()
 		}
 		var m struct{ Secrets map[string]string }
-		must(json.Unmarshal(get(path, "json", true), &m))
+		must(json.Unmarshal(data(get(path, "json", true)), &m))
 		c := exec.Command(rest[0], rest[1:]...)
 		c.Env = os.Environ()
 		for k, v := range m.Secrets {
@@ -69,7 +73,12 @@ func main() {
 		body, _ := json.Marshal(map[string]string{"key": rest[0], "value": rest[1], "path": path})
 		req, _ := http.NewRequest("PUT", base()+"/api/v1/secrets", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		fmt.Println(string(do(req)))
+		var saved struct {
+			Key, Path string
+			Version   int
+		}
+		must(json.Unmarshal(data(do(req)), &saved))
+		fmt.Printf("saved %s (version %d)\n", saved.Key, saved.Version)
 	default:
 		usage()
 	}
@@ -105,9 +114,22 @@ func do(req *http.Request) []byte {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		must(fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b))))
+		var e struct{ Message string }
+		if json.Unmarshal(b, &e) != nil || e.Message == "" {
+			e.Message = strings.TrimSpace(string(b))
+		}
+		must(fmt.Errorf("%s (HTTP %d)", e.Message, resp.StatusCode))
 	}
 	return b
+}
+
+// data returns the payload of the API's {success, message, data} envelope.
+func data(b []byte) []byte {
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	must(json.Unmarshal(b, &env))
+	return env.Data
 }
 
 func must(err error) {

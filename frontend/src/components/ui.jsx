@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from './feedback.jsx'
 
 export function Logo({ size = 26 }) {
   return (
@@ -62,15 +63,15 @@ export function Modal({ title, onClose, children, wide }) {
   )
 }
 
-let toastTimer
-export function useToast() {
-  const [msg, setMsg] = useState('')
-  const show = (m) => { setMsg(m); clearTimeout(toastTimer); toastTimer = setTimeout(() => setMsg(''), 2200) }
-  return [show, msg ? <div className="toast" role="status">{msg}</div> : null]
-}
-
-export const copy = async (text) => {
-  try { await navigator.clipboard.writeText(text); return true } catch { return false }
+export const copy = async (text, label = 'Copied') => {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(label)
+    return true
+  } catch {
+    toast.error('Could not copy. Select the text and copy it manually.')
+    return false
+  }
 }
 
 export const ago = (iso) => {
