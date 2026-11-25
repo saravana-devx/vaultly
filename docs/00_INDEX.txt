@@ -1,0 +1,28 @@
+VAULTLY - DOCUMENTATION INDEX
+=============================
+
+Vaultly is a self-hosted secrets-management platform (think a small Infisical /
+Doppler / HashiCorp Vault). Read these files in order the first time:
+
+  01_PROJECT_OVERVIEW.txt     What it is, what it can do, tech stack, repo layout
+  02_ARCHITECTURE.txt         Components, data flow, request lifecycle, Kafka audit flow
+  03_MODULES_EXPLAINED.txt    Every backend package and frontend file: what it does
+  04_LOW_LEVEL_DESIGN.txt     Interfaces, algorithms, concurrency, trade-offs (honest review)
+  05_DATABASE_SCHEMA.txt      Every table, column, index and relationship
+  06_API_REFERENCE.txt        Every HTTP endpoint with auth, rate limit and behaviour
+  07_SECURITY_MODEL.txt       Encryption, auth, access control, threat model, limits
+  08_FRONTEND_GUIDE.txt       React app structure, routing, state, design system
+  09_SETUP_AND_OPERATIONS.txt Run it, configure it, test it, back it up, troubleshoot
+  10_TESTING.txt              What is tested, how, and what is NOT tested
+  11_RESUME_AND_INTERVIEW_GUIDE.txt  Resume bullets, talking points, likely questions
+  12_REMAINING_WORK.txt       What is missing, and what you must do yourself
+  13_OPENBAO_AND_PII_ENCRYPTION.txt  OpenBao key service + email/name encryption: design, ops, risks
+
+Quick facts
+-----------
+  Backend    Go 1.26, Gin, pgx, go-redis, kafka-go     (backend/)
+  Frontend   React 18 + Vite + react-router            (frontend/)
+  Data       PostgreSQL 16, Redis 7, Kafka 3.8 (KRaft), OpenBao 2.7 (key service)
+  Runs in    Docker Compose (9 containers)
+  App URL    http://localhost:3000     API http://localhost:8080
+  Mail (dev) http://localhost:8025 (Mailpit catches invite emails)

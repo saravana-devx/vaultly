@@ -1,0 +1,97 @@
+09 - SETUP AND OPERATIONS
+=========================
+
+PREREQUISITES   Docker Desktop (Compose v2). Nothing else is needed to run it.
+
+FIRST RUN
+  cd vaultly
+  cp .env.example .env
+  # fill the two values:
+  #   MASTER_KEY=$(openssl rand -base64 32)   (optional once OpenBao is in use; see file 13)
+  #   JWT_SECRET=$(openssl rand -hex 32)
+  docker compose up -d --build      # first start also initialises OpenBao (takes ~20 s)
+  open http://localhost:3000        # register a user; a workspace is created for you
+
+DAILY USE
+  docker compose up -d              start everything
+  docker compose ps                 status
+  docker compose logs -f backend    follow API logs
+  docker compose up -d --build backend     rebuild after Go changes
+  docker compose up -d --build frontend    rebuild after UI changes
+  docker compose down               stop (data is kept in the pgdata volume)
+  NEVER run `docker compose down -v` unless you want to DELETE the database.
+
+SERVICES AND PORTS
+  frontend 3000   backend 8080   postgres 5432   redis 6379   kafka 9094 (host)   mailpit 8025
+  openbao 8200 (UI/API; log in with the root token: docker compose exec openbao-bootstrap cat /boot/root-token)
+
+CONFIGURATION (environment variables of the backend)
+  KEY_PROVIDER           local | openbao (compose default: openbao). See file 13.
+  BAO_ADDR / BAO_TOKEN_FILE / BAO_TRANSIT_MOUNT / BAO_KEY_NAME   OpenBao connection
+  KEY_CACHE_TTL_SECONDS  seconds to cache unwrapped project keys (default 60)
+  MASTER_KEY             base64 of 32 bytes. Required for KEY_PROVIDER=local. With openbao it is
+                         optional (reads keys not yet migrated). LOSING THE ACTIVE KEY = LOSING ALL SECRETS.
+  JWT_SECRET             required. >= 32 chars.
+  DATABASE_URL           default postgres://vaultly:vaultly@localhost:5432/vaultly
+  REDIS_URL              default redis://localhost:6379/0
+  KAFKA_BROKERS          comma list; empty = audit writes go straight to the DB
+  KAFKA_AUDIT_TOPIC      default vaultly.audit
+  CORS_ORIGINS           allowed browser origins (default localhost:5173,3000)
+  APP_URL                used to build invitation links
+  SMTP_HOST/PORT/USER/PASS/FROM   empty SMTP_HOST = emails are only logged
+  WEBHOOK_ALLOW_PRIVATE  "true" lets webhooks call private IPs (dev only)
+  PORT                   default 8080
+
+USING THE CLI / MACHINE API
+  Create a service token in the UI (project -> Service tokens).
+  export VAULTLY_TOKEN=vst_...   VAULTLY_URL=http://localhost:8080
+  docker run --rm -v "$PWD/backend":/src -w /src golang:1.26-alpine \
+      go build -o /src/bin/vaultly ./cmd/vaultly          # build the CLI in Docker
+  ./backend/bin/vaultly pull > .env
+  curl -H "Authorization: Bearer $VAULTLY_TOKEN" "http://localhost:8080/api/v1/secrets?recursive=true"
+
+TESTS (all in Docker)
+  # unit + integration tests (need the running postgres and redis containers)
+  docker run --rm --network vaultly_default \
+    -e DATABASE_URL="postgres://vaultly:vaultly@postgres:5432/vaultly?sslmode=disable" \
+    -e REDIS_URL=redis://redis:6379/0 \
+    -e BAO_ADDR=http://openbao:8200 -e BAO_TOKEN_FILE=/token/app-token -v vaultly_baotoken:/token:ro \
+    -v "$PWD/backend":/src:ro -v vaultly-gomod:/go/pkg -w /src golang:1.26-alpine go test ./...
+  # end-to-end (98 checks against the live stack; add E_EXPECT_BAO=1 to also check OpenBao wrapping; takes ~2 minutes because it waits for expiry
+  # and for the dynamic-secret janitor). Run from the vaultly/ directory:
+  E_EMAIL=you@example.com E_PW='your password' python3 scripts/e2e.py
+  The e2e script creates its own project and one throwaway user and deletes them at the end.
+
+DEMO DATA
+  scripts/seed_demo.py       projects, ~200 secrets, tokens (SEED_EMAIL, SEED_PASSWORD)
+  scripts/seed_features.py   tags, expiry, references, webhook, dynamic, integrations (E, P)
+  scripts/hookrx.py          tiny webhook receiver used by e2e and the demo webhook
+
+OPENBAO OPERATIONS
+  Status:        docker compose exec openbao-bootstrap sh -c 'BAO_ADDR=http://openbao:8200 bao status'
+  Migrate keys:  docker compose run --rm --no-deps backend server rewrap
+  Rotate key:    see file 13 (rotate, then rewrap)
+  BACK UP the volumes vaultly_baodata and vaultly_baoboot separately from the database (file 13).
+  `docker compose down -v` deletes them and makes every secret unreadable.
+
+BACKUP AND RESTORE
+  UI: Settings -> Backup & restore (admins). The .vbk file needs the SAME MASTER_KEY to be useful.
+  Plain database backup also works:  docker compose exec postgres pg_dump -U vaultly vaultly > dump.sql
+  ALWAYS back up the key material separately (OpenBao volumes / MASTER_KEY), never with the dump.
+
+TROUBLESHOOTING
+  UI doesn't open            Docker Desktop not running; `docker compose ps`; try http://localhost:3000
+  "too many requests"        you hit a rate limit (e.g. 10 logins/min); wait the Retry-After seconds
+  Login works, data missing  you used a different database volume or MASTER_KEY
+  Backend restarts           `docker compose logs backend` - usually missing MASTER_KEY/JWT_SECRET
+  Audit log empty            Kafka still starting (the API falls back to direct inserts meanwhile)
+  Invite email missing       open http://localhost:8025 (Mailpit); the link is also shown in the UI
+  Webhook "address not allowed"   set WEBHOOK_ALLOW_PRIVATE=true (dev) or use a public URL
+  Port already in use        stop the other process or change the published port in docker-compose.yml
+
+GOING TO PRODUCTION (checklist - not done for you)
+  - TLS termination (nginx/Caddy/load balancer) and HTTPS-only cookies
+  - Managed Postgres/Redis/Kafka on a private network; don't publish their ports
+  - Strong random MASTER_KEY/JWT_SECRET from a secret manager; plan for KMS
+  - Remove WEBHOOK_ALLOW_PRIVATE; set CORS_ORIGINS and APP_URL to your domain
+  - Real SMTP provider; backups scheduled and restore-tested; monitoring and log shipping

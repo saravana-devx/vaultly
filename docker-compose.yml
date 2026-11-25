@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: vaultly, POSTGRES_PASSWORD: vaultly, POSTGRES_DB: vaultly }
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U vaultly"], interval: 3s, retries: 20 }
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 20 }
+
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["9094:9094"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["8025:8025"]
+
+  # Key service: holds the key that wraps every project key (Transit engine).
+  # Data is persisted in the baodata volume. Losing that volume loses the key.
+  openbao:
+    image: openbao/openbao:2.7.3
+    command: server
+    cap_add: [IPC_LOCK]
+    environment:
+      BAO_LOCAL_CONFIG: |
+        {
+          "ui": true,
+          "disable_mlock": true,
+          "api_addr": "http://openbao:8200",
+          "cluster_addr": "http://openbao:8201",
+          "storage": { "raft": { "path": "/openbao/file", "node_id": "vaultly-1" } },
+          "listener": { "tcp": { "address": "0.0.0.0:8200", "tls_disable": true } }
+        }
+    volumes: [baodata:/openbao/file]
+    ports: ["8200:8200"]
+
+  openbao-bootstrap:
+    image: openbao/openbao:2.7.3
+    user: "0"
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    depends_on: [openbao]
+    restart: unless-stopped
+    volumes:
+      - ./openbao/bootstrap.sh:/bootstrap.sh:ro
+      - baoboot:/boot
+      - baotoken:/token
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      APP_URL: http://localhost:3000
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: no-reply@vaultly.local
+      WEBHOOK_ALLOW_PRIVATE: "true"
+      KEY_PROVIDER: ${KEY_PROVIDER:-openbao}
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN_FILE: /token/app-token
+      DATABASE_URL: postgres://vaultly:vaultly@postgres:5432/vaultly?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BROKERS: kafka:9092
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_started }
+      mailpit: { condition: service_started }
+      openbao-bootstrap: { condition: service_started }
+    volumes:
+      - baotoken:/token:ro
+    ports: ["8080:8080"]
+
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports: ["3000:80"]
+
+volumes:
+  pgdata:
+  baodata:
+  baoboot:
+  baotoken:

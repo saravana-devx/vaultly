@@ -1,0 +1,164 @@
+04 - LOW-LEVEL DESIGN
+=====================
+How the important pieces work internally, then an honest design review.
+
+A. ENVELOPE ENCRYPTION   (internal/crypto)
+------------------------------------------
+  KeyProvider (interface) = root of trust. KEK is either MASTER_KEY (Local) or a Transit key
+  inside OpenBao (the KEK never leaves OpenBao).
+  per project: random 32-byte DEK   stored in projects.encrypted_dek =
+       Local:  AES-GCM(KEK, DEK, aad="dek")      Transit: "vault:v<N>:..." from OpenBao
+  per secret value:                 stored in secrets.encrypted_value = nonce || AES-GCM(DEK, value, aad=projectID)
+
+  Why: the database alone is useless. Compromise needs the DB AND the key service.
+  Rotation: `server rewrap` asks OpenBao to re-wrap each stored key under the newest key version;
+  the DEKs do not change, so no secret is re-encrypted. Unwrapped DEKs are cached ~60 s (dekCache).
+  Hybrid provider = migration aid: reads old Local-wrapped keys, writes new ones via OpenBao.
+  Why per-project keys: blast radius, and cheap future re-wrapping (rotate the KEK
+  by re-wrapping N small keys, not re-encrypting every secret).
+  Why AAD=projectID: a ciphertext copied into another project fails authentication.
+  Nonce: 12 random bytes per encryption (GCM). Random nonces are safe at this volume.
+
+B. SLIDING-WINDOW RATE LIMITER   (internal/ratelimit)
+-----------------------------------------------------
+  Interface:  Allow(ctx, key, limit, window) -> {Allowed, Remaining, ResetAt}
+  Redis sorted set per key; member = unique id, score = time in ms.
+  Lua script (atomic, so no race between check and add):
+     now = redis TIME (ms)
+     ZREMRANGEBYSCORE key -inf now-window        drop old hits
+     count = ZCARD key
+     if count >= limit: return {0, 0, oldest+window}     <- rejected hits are NOT stored
+     ZADD key now nonce ; PEXPIRE key window
+     return {1, limit-count-1, oldest+window}
+  Uses Redis's clock (not app servers') so multiple API instances agree.
+  Middleware fails OPEN on Redis errors (logs and allows) - availability over strictness.
+  Keys: rl:<name>:<ip | userID | tokenID>.
+
+C. VERSIONED, TRANSACTIONAL WRITES   (api/secrets.go writeSecret)
+----------------------------------------------------------------
+  BEGIN
+    SELECT id,version,tags,expires_at FROM secrets WHERE env_id,path,key  FOR UPDATE
+    no row  -> INSERT version 1          row -> UPDATE version+1
+    INSERT INTO secret_versions (secret_id, version, ciphertext, action, actor)
+  COMMIT
+  FOR UPDATE serialises concurrent writers on one secret, so versions never collide.
+  Tags/expiry carry over when the caller doesn't set them. Rollback = decrypt the old
+  version and write it as a NEW version (history is append-only).
+
+D. PERMISSION RESOLUTION   (api/server.go + api/envroles.go)
+------------------------------------------------------------
+  1. s.project(): join projects + memberships -> the caller's WORKSPACE role.
+     Not a member -> 404 (existence is not leaked).
+  2. s.envRole(slug): admin -> admin. Else look up member_env_roles(org,user,slug):
+     found -> that role (none|viewer|developer), not found -> workspace role.
+     Overrides can both restrict AND grant (an admin decides).
+  3. needEnv(c, p, slug, need): compares ranks none<viewer<developer<admin.
+  Every secret handler: loads project with the minimum role "viewer", then calls
+  needEnv for the actual environment, because the environment decides.
+  Hidden environments are also filtered from getProject, search and reference
+  resolution (the `allow` callback), so nothing leaks through side channels.
+
+E. SECRET REFERENCES   (api/secrets.go resolver)
+------------------------------------------------
+  Syntax:  ${KEY}  ${/path/KEY}  ${env:/path/KEY}
+  Relative KEY: look in the secret's own path, then in "/".
+  expand(value) -> regex replace; each hit -> lookup(env,path,key):
+     - skipped if allow(env,path) is false   (token scope / user env role)
+     - cycle check with a stack of "env|path|key"; a cycle leaves the text literal
+     - recursion depth cap 8
+  Expired secrets are not resolvable. Unresolvable references stay as written.
+  Service tokens can only resolve inside their own environment and path prefix.
+
+F. AUDIT PIPELINE   (internal/audit)
+------------------------------------
+  Publish(): marshal -> kafka.Writer (key=orgID, RequireOne acks, 3 s timeout)
+             on error -> direct INSERT, so nothing is lost
+  Run():     ensureTopic (retry until Kafka is up) -> Reader in group
+             FetchMessage -> INSERT ON CONFLICT DO NOTHING (retry until OK) ->
+             CommitMessages -> notify(subscribers)
+  Subscribe(fn) is a tiny observer pattern: the webhook Dispatcher.Handle and the
+  API's autoSync are registered in NewServer(). Subscribers recover from panics.
+
+G. WEBHOOK DELIVERY   (internal/webhook)
+----------------------------------------
+  Match(patterns, action) uses glob (secret.*, token.create, *).
+  Signature header:  X-Vaultly-Signature: v1=hex(HMAC_SHA256(secret, timestamp + "." + body))
+  with X-Vaultly-Timestamp so receivers can reject replays.
+  Payload never contains secret values (only event, actor, resource, metadata).
+  Deliver(): up to 3 attempts, delays 1 s then 5 s; non-2xx counts as failure.
+  SSRF: the dialer's Control hook rejects loopback/private/link-local IPs AFTER DNS
+  resolution; redirects are not followed. WEBHOOK_ALLOW_PRIVATE=true disables this (dev).
+  Each delivery is stored; older than the latest 100 per hook are pruned.
+
+H. DYNAMIC SECRETS   (internal/dynamic + api/dynamic.go)
+--------------------------------------------------------
+  Lease:  username = "v_" + 16 random [a-z0-9]; password = 32 random alphanumerics
+          CREATE ROLE "u" LOGIN PASSWORD '...' VALID UNTIL '<expiry>'
+          run each admin GRANT template with {{name}} -> "u"   (failure rolls the role back)
+          INSERT dynamic_leases (username, expires_at)         (failure drops the role)
+  TTL is clamped to [60 s, config max]. The password is returned once, never stored.
+  Revoke: pg_terminate_backend, DROP OWNED BY, DROP ROLE IF EXISTS (idempotent).
+  Janitor revokes expired leases every 20 s; deleting a project/environment revokes first.
+  The admin connection URL is stored encrypted with the project key.
+
+I. BACKUP FORMAT   (internal/backup + api/backup.go)
+----------------------------------------------------
+  JSON {projects[{id, encrypted_dek, environments, secrets[{ciphertext, versions}]}]}
+  -> gzip -> key = scrypt(passphrase, salt, N=32768,r=8,p=1) -> AES-256-GCM
+  File = "VLTYBK1" | salt(16) | nonce(12) | ciphertext
+  Restore keeps ORIGINAL project IDs (ciphertext is bound to them) and never overwrites;
+  it checks each wrapped key can be unwrapped with the current MASTER_KEY first.
+
+I2. PII ENCRYPTION AND BLIND INDEX   (internal/pii)
+-----------------------------------------------
+  Seal(field,v) = "enc:v1:" + base64(nonce || AES-GCM(piiKey, v, aad=field))   random nonce
+  Index(v)      = HMAC-SHA256(indexKey, lower(trim(v)))                         deterministic
+  Login: hash = Index(email) -> SELECT ... WHERE email_hash=$1 -> open email/name -> bcrypt check.
+  Uniqueness: UNIQUE INDEX on email_hash (the plaintext column is NULL).
+  Audit events are sealed before Kafka and before INSERT (idempotent: already-sealed values are
+  left alone); subscribers (webhooks) receive the opened event.
+  Startup Backfill encrypts any legacy plaintext rows in batches (re-runnable).
+
+J. DESIGN PATTERNS USED (where they genuinely apply)
+----------------------------------------------------
+  Strategy / interface + implementation   Limiter, Sender, Provider (integrations),
+                                          dynamic.Provider, crypto.KeyProvider (Local/Transit/Hybrid)
+  Observer                                audit.Subscribe
+  Dependency injection (constructor)      NewServer wires every collaborator
+  Middleware chain                        Gin: auth -> rate limit -> handler
+  Envelope encryption                     Keyring
+  Optimistic duplicate-safety             ON CONFLICT DO NOTHING (audit idempotency)
+  Compile-time interface checks           var _ Limiter = (*SlidingWindow)(nil)
+
+K. HONEST DESIGN REVIEW  (read this before an interview)
+---------------------------------------------------------
+Good:
+  - Everything pluggable or security-critical is a small package behind an interface
+    with focused tests (crypto, ratelimit, webhook, integrations, dynamic, backup).
+  - Side effects are isolated (mail, HTTP, Redis, Kafka are behind types you can fake).
+  - Concurrency is handled deliberately: row locks, atomic Lua, idempotent consumer.
+
+Weak spots - a strict reviewer WOULD flag these:
+  1. No repository/service layering. Handlers in internal/api build SQL and call it
+     directly ("transaction script" style). It is easy to read but you cannot unit-test
+     handlers without a database, and SQL is spread over many files.
+     A cleaner design: handler -> service (business rules) -> repository (SQL),
+     as the author's Distributed-rate-limiter project does.
+  2. `Server` is a "god struct" holding every dependency; the api package is large
+     (orgs.go 536 lines, secrets.go 793 lines) and mixes concerns.
+  3. Migrations are plain idempotent SQL with no schema_migrations version table,
+     so you cannot do down-migrations or know the applied version.
+  4. In-memory background state: webhook goroutines and the auto-sync debounce timers
+     are lost on a crash/restart and are per-instance. A durable job queue (or a
+     Kafka topic for deliveries) would fix this.
+  5. The only API-level tests are the live end-to-end script (scripts/e2e.py);
+     there are no Go tests for handlers, and no CI pipeline runs anything.
+  6. Lists are not paginated (members, tokens, secrets in a folder).
+  7. KEY SERVICE: OpenBao is supported, but the demo setup unseals with a single key stored on a
+     Docker volume (dev convenience), runs one node without TLS, and PII keys cannot be rotated
+     (only re-wrapped). MASTER_KEY remains as an optional legacy fallback.
+  8. Rate-limit and IP-allowlist correctness depend on trusted-proxy configuration.
+
+Be able to say: "I kept the pluggable/security-critical code behind interfaces and
+tested it; the HTTP layer is deliberately simple, and the next step would be
+extracting a service+repository layer so handlers become unit-testable."

@@ -1,0 +1,108 @@
+06 - API REFERENCE
+==================
+Base URL: /api   (through nginx: http://localhost:3000/api, direct: http://localhost:8080/api)
+JSON in/out. Errors: {"error": "message"} with a proper HTTP status.
+
+AUTH HEADERS
+  Users / scripts:  Authorization: Bearer <JWT access token>  or  Bearer vpt_<personal token>
+  Machines:         Authorization: Bearer vst_<service token>   (only /api/v1/*)
+RATE LIMITS are listed per route as [limit/window per key]. Every response carries
+X-RateLimit-Limit / -Remaining / -Reset; a 429 also carries Retry-After.
+Global: all /api routes 600/min per IP; signed-in routes 600/min per user.
+
+HEALTH
+  GET  /healthz                                   liveness, no auth
+
+AUTH (public)
+  POST /auth/register   {name,email,password,org_name?}   [10/hour per IP]
+                        creates user + workspace (admin); sets refresh cookie
+  POST /auth/login      {email,password}                  [10/min per IP]
+  POST /auth/refresh    (cookie)                          [60/min per IP]  single-use rotation
+  POST /auth/logout
+  GET  /invites/:token  public invitation preview (email masked)  [30/min per IP]
+
+SELF
+  GET  /me                              current user
+  GET  /me/tokens   POST /me/tokens {name,expire_days}   DELETE /me/tokens/:tid
+                    (personal tokens; a personal token cannot create/delete tokens)
+
+WORKSPACES (:org = org id)
+  GET  /orgs                            my workspaces + role
+  POST /orgs {name}                     create (caller becomes admin)
+  GET  /orgs/:org/stats                 dashboard data (activity, recent, attention: admin)
+  GET  /orgs/:org/members               with per-environment overrides
+  POST /orgs/:org/members {email,role}  add an EXISTING user (admin)
+  PATCH  /orgs/:org/members/:uid {role} (admin; cannot demote the last admin)
+  DELETE /orgs/:org/members/:uid        admin removes anyone; anyone can leave
+  GET  /orgs/:org/env-slugs             distinct environment names in the workspace
+  GET|PUT /orgs/:org/members/:uid/env-roles   {roles:{prod:"none",staging:"viewer",qa:"inherit"}}
+  GET  /orgs/:org/invites               pending invitations (admin)
+  POST /orgs/:org/invites {email,role,env_roles}   emails a link, returns {link} (admin)
+  DELETE /orgs/:org/invites/:iid        revoke
+  POST /invites/:token/accept           signed-in user whose email matches the invite
+  GET  /orgs/:org/audit?project_id=&before=   audit log, newest first, paged (admin)
+  POST /orgs/:org/backup {passphrase}   returns an encrypted .vbk file   [5/hour per user]
+  POST /orgs/:org/restore  multipart: file + passphrase                  [5/hour per user]
+  GET|POST /orgs/:org/projects          list / create (admin; creates dev, staging, prod)
+
+PROJECTS (:pid)
+  GET    /projects/:pid                 project + the environments YOU may see
+  DELETE /projects/:pid                 admin; revokes dynamic leases first
+  POST   /projects/:pid/environments {name,slug?}    DELETE .../environments/:eid   (admin)
+
+SECRETS  (role needed is per ENVIRONMENT: viewer to read, developer to write)
+  GET  /projects/:pid/secrets?env=&path=/&tag=       list one folder (values NOT included)
+  GET  /projects/:pid/secrets/search?q=&env=         across paths/envs you can read
+  PUT  /projects/:pid/secrets {env,path,key,value,comment,tags[],expires_at,clear_expiry}
+                                                     create or update (new version)
+  GET  /projects/:pid/secrets/:sid                   reveal value (+ "resolved" if it has ${refs})
+                                                     audited                   [60/min per user]
+  DELETE /projects/:pid/secrets/:sid
+  GET  /projects/:pid/secrets/:sid/versions          history (no values)
+  POST /projects/:pid/secrets/:sid/rollback {version}
+  POST /projects/:pid/secrets/:sid/rotate {length?}  replaces value with a random string
+  POST /projects/:pid/secrets/import {env,path,content}   .env text
+  GET  /projects/:pid/secrets/export?env=&path=&format=dotenv|shell|json&recursive=&resolve=
+                                                     audited                   [10/min per user]
+
+SERVICE TOKENS (admin)
+  GET|POST /projects/:pid/tokens {name,env,path,can_write,expire_days,allowed_cidrs[]}
+  DELETE   /projects/:pid/tokens/:tid                the raw token is shown ONCE at creation
+
+WEBHOOKS (admin)
+  GET|POST /projects/:pid/webhooks {name,url,events[]}     signing secret shown once
+  PATCH|DELETE /projects/:pid/webhooks/:wid                {active,events,url,name}
+  POST /projects/:pid/webhooks/:wid/test                   [20/min per user]
+  GET  /projects/:pid/webhooks/:wid/deliveries
+
+INTEGRATIONS (admin)
+  GET|POST /projects/:pid/integrations {provider:github|vercel|railway,name,env,path,config{},auto_sync}
+  PATCH|DELETE /projects/:pid/integrations/:iid            {auto_sync}
+  POST /projects/:pid/integrations/:iid/sync               [20/min per user]
+
+DYNAMIC SECRETS
+  GET|POST /projects/:pid/dynamic {name,env,admin_url,grants[],default_ttl_s,max_ttl_s}  (admin)
+  DELETE   /projects/:pid/dynamic/:did                     (admin; revokes live leases)
+  POST /projects/:pid/dynamic/:did/lease {ttl_seconds}     developer in that env  [30/min per user]
+       -> {lease_id, username, password, connection_url, expires_at}   (password shown once)
+  GET  /projects/:pid/dynamic/:did/leases                  (admin)
+  DELETE /projects/:pid/dynamic/:did/leases/:lid           revoke now (admin)
+
+MACHINE API  (service token; scope = its environment + path prefix)   [600/min per token]
+  GET  /api/v1/secrets?path=&recursive=true|false&format=json|dotenv|shell&resolve=true|false
+       expired secrets are excluded; references resolve inside the token's scope only
+  PUT  /api/v1/secrets {path,key,value,comment}            only if the token is write-enabled
+  POST /api/v1/dynamic/:name/lease {ttl_seconds}           [60/min per token]
+  Optional IP allowlist: a request from another IP gets 403 and an audit event token.denied.
+
+STATUS CODES YOU WILL SEE
+  400 invalid input   401 not signed in / bad token   403 role or scope too low
+  404 not found OR not your workspace (existence is not revealed)
+  409 conflict (duplicate email, last admin, existing member)   410 invite used/expired
+  429 rate limited    502 an outbound call (integration/dynamic DB) failed
+
+AUDIT ACTION NAMES (for webhooks and the audit log)
+  auth.login auth.register  secret.create|update|delete|read|rotate|rollback|import|export|fetch|expired
+  token.create|revoke|denied  member.add|remove|role_change|invite|invite_revoke|join|env_roles
+  project.create|delete  environment.create|delete  webhook.create|update|delete|test
+  integration.create|delete|sync  dynamic.create|delete|lease|revoke  org.backup|restore

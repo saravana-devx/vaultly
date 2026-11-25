@@ -1,0 +1,80 @@
+05 - DATABASE SCHEMA  (PostgreSQL 16)
+=====================================
+Migrations: 001_init.sql, 002_features.sql, 003_encryption.sql (18 tables in total).
+Source of truth: backend/internal/db/migrations/001_init.sql and 002_features.sql.
+All ids are uuid (gen_random_uuid()) unless noted. "cascade" = ON DELETE CASCADE.
+
+IDENTITY AND TENANCY
+--------------------
+users            id, email_enc, name_enc (sealed), email_hash (blind index, UNIQUE), password_hash
+                 (bcrypt), created_at.  Legacy plaintext columns email/name exist but are NULL.
+orgs             id, name, created_at                         (a "workspace")
+memberships      PK(org_id, user_id)  role IN (admin,developer,viewer)   cascade both
+member_env_roles PK(org_id, user_id, env_slug)  role IN (none,viewer,developer)
+                 FK (org_id,user_id) -> memberships, cascade
+                 Overrides the workspace role for one environment NAME across all projects.
+invites          id, org_id, email_enc + email_hash (sealed / blind index), role, env_roles jsonb,
+                 token_hash UNIQUE (sha256), invited_by (sealed), expires_at, accepted_at, created_at
+personal_tokens  id, user_id, name, token_prefix, token_hash UNIQUE, expires_at, last_used_at
+
+PROJECTS AND SECRETS
+--------------------
+projects         id, org_id, name, encrypted_dek (bytea, wrapped by MASTER_KEY), created_at
+environments     id, project_id, name, slug, position     UNIQUE(project_id, slug)
+secrets          id, project_id, env_id, path ('/'), key, encrypted_value (bytea),
+                 version, comment, tags text[], expires_at, expiry_notified,
+                 created_at, updated_at, updated_by
+                 UNIQUE(env_id, path, key)
+                 INDEX (env_id, path)   INDEX gin(tags)   partial INDEX on expires_at
+secret_versions  id bigserial, secret_id (cascade), version, encrypted_value,
+                 action (create|update|rollback|rotate), actor, created_at
+                 UNIQUE(secret_id, version)       -- append-only history
+
+MACHINE ACCESS
+--------------
+service_tokens   id, project_id, env_id, name, token_prefix, token_hash UNIQUE,
+                 path_prefix, can_write, allowed_cidrs text[], expires_at,
+                 last_used_at, created_by, created_at
+
+AUDIT
+-----
+audit_logs       id (uuid, supplied by the producer -> idempotent inserts), org_id,
+                 project_id (nullable, no FK so history survives project deletion),
+                 actor_type (user|token|system), actor_id, actor_label, action,
+                 resource, metadata jsonb, ip, created_at
+                 INDEX (org_id, created_at DESC)  INDEX (project_id, created_at DESC)
+
+APPLICATION KEYS
+----------------
+app_keys         name PK (pii-enc | pii-index), wrapped bytea (wrapped by the KeyProvider), created_at
+
+INTEGRATIONS
+------------
+webhooks            id, project_id, name, url, secret_enc (encrypted with project key),
+                    events text[] (globs), active
+webhook_deliveries  id bigserial, webhook_id (cascade), event_id, action, status, error,
+                    attempts, duration_ms, created_at   (latest 100 kept per webhook)
+integrations        id, project_id, env_id, path, provider (github|vercel|railway), name,
+                    config_enc (credentials, encrypted with project key), auto_sync,
+                    last_synced_at, last_status, last_error
+dynamic_configs     id, project_id, env_id, name, provider, config_enc (admin URL+grants,
+                    encrypted), default_ttl_s, max_ttl_s    UNIQUE(project_id,env_id,name)
+dynamic_leases      id, config_id (cascade), username, expires_at, revoked_at,
+                    revoke_error, created_by         partial INDEX on active leases
+
+RELATIONSHIP SUMMARY
+--------------------
+  users 1─* memberships *─1 orgs 1─* projects 1─* environments 1─* secrets 1─* secret_versions
+                                     projects 1─* service_tokens / webhooks / integrations / dynamic_configs
+  orgs 1─* audit_logs (by id, no FK)      users 1─* personal_tokens
+
+WHAT IS ENCRYPTED AT REST
+-------------------------
+  secrets.encrypted_value, secret_versions.encrypted_value  (project key, AES-GCM)
+  projects.encrypted_dek, app_keys.wrapped                   (OpenBao Transit key, or MASTER_KEY)
+  users.email_enc/name_enc, invites.email_enc, and any 'who did it' label that is an email
+     (secrets.updated_by, secret_versions.actor, service_tokens.created_by, invites.invited_by,
+      dynamic_leases.created_by, audit_logs.actor_label/resource)   -> "enc:v1:..." (PII key)
+  webhooks.secret_enc, integrations.config_enc, dynamic_configs.config_enc (project key)
+  Hashed (one-way): users.password_hash (bcrypt), every *token_hash (SHA-256)
+  Plain: project/environment names, paths, secret KEY NAMES, tags, comments, audit metadata.

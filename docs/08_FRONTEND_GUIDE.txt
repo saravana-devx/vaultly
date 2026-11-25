@@ -1,0 +1,70 @@
+08 - FRONTEND GUIDE  (frontend/)
+================================
+React 18 + Vite. No UI library and no state library: plain CSS and React context.
+
+BUILD AND SERVE
+  Dev:  npm run dev (Vite on :5173, proxies /api to :8080)  - not used in the Docker setup
+  Prod: Dockerfile builds with `vite build`, nginx serves /usr/share/nginx/html and proxies
+        /api/ to the backend (nginx.conf). Unknown paths fall back to index.html (SPA routing).
+
+ENTRY AND ROUTING
+  src/main.jsx       BrowserRouter + AuthProvider + App
+  src/App.jsx        route table
+     /                 Landing (public)             /login /register  AuthPages
+     /invite/:token    Invite acceptance (public)
+     /app              Shell (private) with children:
+        index Dashboard | projects Projects | projects/:pid Project | members Members |
+        audit Audit | settings Settings
+  Private()/Public() wrappers redirect based on session. ?next=/path survives login/register
+  (used by the invite flow; only same-site paths are honoured).
+
+SESSION AND API ACCESS
+  src/api.js
+    - Access token is kept in a module variable (memory only, never localStorage).
+    - api(path, opts) adds the Bearer token; on 401 it calls /auth/refresh (cookie) once,
+      retries, and otherwise emits a "vaultly:logout" event.
+    - apiBlob / apiForm for file download and upload (backup/restore).
+  src/auth.jsx
+    - AuthProvider: user, orgs, current orgId (remembered in localStorage), login/register/logout,
+      reloadOrgs. On load it tries a silent refresh to restore the session.
+
+LAYOUT (src/components)
+  Shell.jsx           sidebar (workspace switcher, nav, project list, user) + sticky top bar
+                      (search button, "+ New" menu) + <Outlet/>. Listens for Cmd/Ctrl+K and for the
+                      "vaultly:projects" event to refresh the project list.
+  CommandPalette.jsx  Cmd/Ctrl+K: jump to pages/projects, run actions. Arrow keys + Enter.
+  ui.jsx              Logo, Icon (inline SVG set), Modal, Menu (popover), Avatar, toast hook,
+                      copy(), ago() relative time, hue() colour per name.
+
+PAGES (src/pages)
+  Landing.jsx         marketing page with product preview, features, security, FAQ
+  AuthPages.jsx       split-screen login / signup, password strength meter, show/hide
+  Dashboard.jsx       KPI cards (+sparkline), activity chart with 7d/14d toggle, projects table,
+                      "Needs attention" (expiring tokens/secrets), recent activity, onboarding
+  Projects.jsx        project table + create modal
+  Project.jsx         tabs: Secrets | Service tokens | Dynamic | Integrations | Webhooks | Settings
+                      Secrets: environment switcher, folders, tag filter, global search,
+                      reveal/copy/edit/history/rotate/delete, import/export, expiry badges
+  project/*.jsx       Integrations, Webhooks, Dynamic (one file per tab)
+  Members.jsx         members, roles, per-environment access, invitations
+  Audit.jsx           filterable audit table with "load more"
+  Settings.jsx        personal tokens, backup and restore
+  Invite.jsx          accept-an-invitation page
+
+DESIGN SYSTEM (src/styles.css)
+  One file, three layers:
+   1. Tokens (:root) + base controls (.btn .input .modal ...)  - shared
+   2. Landing + auth styles (.lp-*, .auth-*)                   - marketing side
+   3. "APP THEME v3" scoped under .shell                       - the signed-in app
+  The signed-in app overrides the CSS variables inside .shell (Geist font, graphite
+  neutrals, green accent) so the landing/auth pages are unaffected. Panels, tables,
+  KPI cards, the command palette and the top bar live in the v3 block.
+
+STATE PATTERNS
+  Local useState per page; data fetched in useEffect; cross-component signals use
+  window events ("vaultly:projects", "vaultly:logout"). Secret values are fetched only
+  when revealed/copied and are held in component state, never persisted.
+
+KNOWN FRONTEND GAPS
+  No tests, no TypeScript, no pagination controls (except audit), no dark/light toggle
+  (dark only), minimal mobile polish on the app screens.

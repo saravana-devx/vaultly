@@ -1,0 +1,45 @@
+10 - TESTING
+============
+
+WHAT EXISTS
+-----------
+1) Go tests - 36 tests, run with `go test ./...` (see 09 for the Docker command)
+   crypto       10   envelope round-trip; tampering/wrong AAD/wrong key fail; OpenBao Transit client against
+                     a fake server (data key, rewrap keeps the DEK, errors hide the token, legacy-key
+                     migration through Hybrid); 1 LIVE test against a real OpenBao (needs BAO_*)
+   pii           4   seal/open, field binding, blind index (stable, case-insensitive, keyed), label sealing
+   ratelimit     3   allows up to the limit then blocks; rejected hits don't extend the window;
+                     keys are independent                    (needs Redis)
+   webhook       5   glob matching; valid HMAC signature and no secret values in payload;
+                     retries then succeeds; private addresses blocked; redirects not followed
+   integrations  7   GitHub sealed-box encryption verified by decrypting with the repo key,
+                     environment path, API error surfacing; Vercel upsert + target validation;
+                     Railway GraphQL errors; config display never leaks tokens  (mock servers)
+   dynamic       3   a leased role really logs in and stops working after revoke; failed grant
+                     rolls back; unsafe role names rejected     (needs Postgres)
+   backup        4   round trip; wrong passphrase/tamper fails; weak passphrase and foreign
+                     files rejected; each seal is randomised
+
+2) End-to-end script - scripts/e2e.py, 98 checks against the LIVE stack
+   references (relative/absolute/cycle/cross-env) | tags, search, expiry (incl. waiting for
+   expiry) | token IP allowlist | invites with real email via Mailpit | per-environment roles
+   (hidden env, blocked write, search/export don't leak) | personal tokens | webhooks with a
+   real receiver container (signature verified, filtering, pause) | integrations CRUD and
+   credential encryption at rest | dynamic secrets against Postgres (login works, revoke works,
+   janitor expiry) | backup, wrong passphrase, delete project, restore, decrypt again |
+   encryption at rest (no plaintext email/name anywhere in a full pg_dump, blind-index login,
+   API still returns decrypted values, project keys wrapped by OpenBao)
+
+WHAT IS NOT TESTED  (say this honestly if asked)
+------------------------------------------------
+  - GitHub / Vercel / Railway adapters against the real services (only mock servers)
+  - Handlers in isolation (no Go handler tests; coverage comes from e2e)
+  - The React UI (no unit or browser tests; checked manually with screenshots)
+  - Kafka failure/recovery paths beyond the fallback code path
+  - Load/performance, multi-instance behaviour, TLS, a real SMTP provider
+  - No CI pipeline executes any of this automatically
+
+HOW TO ADD A TEST
+  Pure logic -> a *_test.go next to the package (see webhook_test.go for httptest use).
+  Needs a database -> follow dynamic_test.go (skips if Postgres is unreachable).
+  New endpoint behaviour -> add a check() block to scripts/e2e.py.

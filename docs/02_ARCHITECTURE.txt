@@ -1,0 +1,105 @@
+02 - ARCHITECTURE
+=================
+
+COMPONENTS
+----------
+
+   Browser ──────────►  nginx (frontend container, :3000)
+      ▲                    │  static React build
+      │                    │  /api/*  ──proxy──►  Go API (backend container, :8080)
+      │                                              │
+      │                       ┌──────────────────────┼──────────────────────┐
+      │                       ▼                      ▼                      ▼
+      │                  PostgreSQL               Redis                  Kafka        OpenBao
+
+      │                (all durable data)   (refresh tokens,        (audit event stream,
+      │                                      rate-limit windows)      topic vaultly.audit)
+      │                       ▲                                             │
+      │                       └──────── audit consumer (inside the API) ◄───┘
+      │
+   CLI / CI / apps ──► Go API  (/api/v1/*  with a service token)
+
+   OpenBao (Transit engine) wraps/unwraps the per-project data keys; secret values themselves
+   are never sent to it. A small bootstrap container initialises and unseals it.
+
+   Mailpit (dev only) receives invitation emails over SMTP :1025, UI on :8025.
+
+There is ONE Go process. It serves HTTP, runs the Kafka consumer, and runs a
+background "janitor" goroutine. It is stateless (state is in Postgres/Redis/Kafka),
+so you can run several copies behind a load balancer.
+
+THREE KINDS OF CALLER
+---------------------
+  1. A signed-in USER (browser)       Authorization: Bearer <JWT access token>
+  2. A user's PERSONAL TOKEN (script) Authorization: Bearer vpt_...
+  3. A MACHINE (service token)        Authorization: Bearer vst_...   -> only /api/v1/*
+
+Middleware: userAuth accepts 1 and 2; tokenAuth accepts 3. They produce a
+`principal` stored in the Gin context; handlers read it with me(c).
+
+REQUEST LIFECYCLE (example: a user saves a secret)
+--------------------------------------------------
+  PUT /api/projects/:pid/secrets
+   1. nginx forwards to the API
+   2. Gin middleware: Recovery, Logger, CORS, security headers
+   3. rateLimit("ip", 600/min)         - Redis Lua sliding window
+   4. userAuth: verify JWT (or look up personal token hash)
+   5. rateLimit("user", 600/min)
+   6. handler putSecret:
+        a. s.project(c, "viewer")       joins projects+memberships -> org role
+        b. validate key / path / tags / expiry
+        c. s.needEnv(c, p, env, "developer")   per-environment role check
+        d. s.dek(): load the wrapped project key, unwrap it via OpenBao (cached ~60 s)
+        e. writeSecret(): in ONE transaction
+             SELECT ... FOR UPDATE  (lock the row)
+             encrypt value with the project key (AES-256-GCM)
+             INSERT or UPDATE secrets, INSERT secret_versions
+        f. s.record(): publish an audit event (see below)
+   7. JSON response (the value is NEVER returned on write)
+
+AUDIT PIPELINE (Kafka)
+----------------------
+  Handler ──Publish()──► Kafka topic "vaultly.audit"   (key = org id, 3 partitions)
+                              │
+              consumer group "vaultly-audit-writer"
+                              │
+                       INSERT INTO audit_logs  ... ON CONFLICT (id) DO NOTHING
+                              │  (offset committed only AFTER the insert)
+                              ▼
+                  notify subscribers:  webhook dispatcher, integration auto-sync
+
+  Why Kafka: writing the audit row is off the request path, events for one
+  organisation stay ordered (same key -> same partition), and the consumer can be
+  scaled or replayed. The ON CONFLICT makes redelivery harmless (at-least-once).
+  FALLBACK: if publishing to Kafka fails (3 s timeout) the event is written
+  straight to Postgres, so an audit entry is never silently dropped.
+  Trade-off: subscribers run after the commit, so a crash between commit and
+  notify can skip one webhook (at-most-once for subscribers).
+
+BACKGROUND WORK (all in-process)
+--------------------------------
+  Janitor (every 20 s)   revoke expired dynamic-secret leases;
+                         announce newly-expired secrets (audit event secret.expired)
+  Webhook delivery       one goroutine per delivery, 3 attempts, 1 s then 5 s backoff
+  Integration auto-sync  on a secret write, a 3 s debounced timer per integration
+  Audit consumer         one goroutine reading Kafka
+
+KEY FLOWS
+---------
+  Sign-up:   POST /auth/register -> user + new workspace (admin) in one transaction
+  Sign-in:   password check (bcrypt) -> access JWT (15 min) + refresh cookie (7 d)
+  Refresh:   cookie -> Redis GETDEL (single use) -> new access + new refresh
+  Machine:   service token -> hash lookup -> env + path scope + optional IP check
+  Invite:    admin creates -> email with link -> invitee signs in/up -> accept ->
+             membership + env overrides created, invite marked used
+  Dynamic:   request lease -> CREATE ROLE ... VALID UNTIL on target DB ->
+             janitor DROPs the role at expiry
+  Backup:    export JSON -> gzip -> scrypt-derived key -> AES-GCM -> .vbk file
+
+DEPLOYMENT VIEW (docker-compose.yml)
+------------------------------------
+  postgres  (volume pgdata)     redis      kafka (KRaft, single broker)
+  mailpit                       backend    frontend (nginx)
+  openbao (volume baodata)      openbao-bootstrap (volumes baoboot, baotoken)
+  Only frontend :3000 needs to be public. Backend :8080 is exposed in dev for
+  the CLI and scripts.

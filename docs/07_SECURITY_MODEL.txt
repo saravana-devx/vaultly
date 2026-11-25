@@ -1,0 +1,78 @@
+07 - SECURITY MODEL
+===================
+
+ASSETS WE PROTECT
+  Secret values; the MASTER_KEY; user passwords; tokens (service, personal, invite,
+  refresh); the integrity and completeness of the audit trail.
+
+CONTROLS, BY LAYER
+------------------
+Data at rest
+  - Secret values: AES-256-GCM with a per-project key; the key itself is wrapped by a key that
+    lives in OpenBao (Transit) - or MASTER_KEY in local mode - and is never stored in the database.
+  - Personal data (email, name, actor labels) is encrypted at the application layer (AES-GCM,
+    field name as additional data); lookups use an HMAC blind index. See file 13.
+  - GCM authenticates: tampering is detected; AAD binds ciphertext to its project.
+  - Integration credentials, webhook secrets, dynamic-secret admin URLs are encrypted
+    the same way. Backups are re-encrypted with a user passphrase (scrypt + AES-GCM).
+
+Authentication
+  - Passwords: bcrypt cost 12; login does a dummy hash for unknown emails so response
+    time doesn't reveal whether an account exists. Max password length 72 (bcrypt limit).
+  - Access token: 15-minute JWT (HS256, fixed algorithm, issuer checked).
+  - Refresh token: opaque random, stored hashed in Redis, single use (rotated),
+    delivered as httpOnly + SameSite=Strict cookie scoped to /api/auth (not readable by JS,
+    not sent cross-site). The access token lives only in browser memory.
+  - Service/personal/invite tokens: 256-bit random, shown once, stored as SHA-256.
+  - Invitations: single use, 7-day expiry, bound to the invited email address.
+
+Authorization
+  - Workspace roles (admin/developer/viewer) + per-environment overrides.
+  - Non-members get 404, not 403 (don't confirm a project exists).
+  - Service tokens: ONE environment, ONE path prefix, read-only unless enabled, optional
+    expiry, optional IP allowlist. A token can't be used to manage anything (only /api/v1).
+  - Personal tokens inherit the user's exact permissions and cannot mint more tokens.
+  - Secret values are never returned by list/search; revealing one is an audited action
+    with its own rate limit; export is audited and rate limited.
+
+Network and abuse
+  - Sliding-window rate limits on every route (stricter on login/register/export/reveal).
+  - Webhooks: SSRF protection (private/loopback blocked at dial time, no redirects).
+  - Gin trusts X-Forwarded-For only from private-range proxies, so clients can't spoof
+    their IP to dodge rate limits or IP allowlists.
+  - Security headers: X-Content-Type-Options, Cache-Control: no-store.
+  - SQL: all queries are parameterised. The only SQL built from identifiers (dynamic
+    secrets role names) uses generated names validated by regex.
+
+Audit
+  - Every sensitive action emits an event with actor, IP, resource and metadata.
+  - Events go through Kafka with a direct-to-DB fallback; inserts are idempotent.
+
+THREAT MODEL (what happens if...)
+---------------------------------
+  Database dump stolen             -> only ciphertext + wrapped keys; no emails or names; useless
+                                      without access to OpenBao.
+  Database + OpenBao access stolen -> full compromise (OpenBao root token / unseal key / its
+                                      app token). Protect OpenBao like a root of trust.
+  Redis stolen                     -> refresh tokens are hashed; rate-limit data only.
+  Service token leaked             -> limited to one env/path; revoke it; IP allowlist helps.
+  A member is compromised          -> limited to their roles/environments; audit shows reads.
+  Kafka down                       -> API keeps working; audit falls back to direct inserts.
+  Webhook endpoint compromised     -> payloads contain no secret values.
+  Backup file stolen               -> encrypted with passphrase (scrypt); still needs a strong passphrase.
+
+KNOWN LIMITATIONS (be upfront about these)
+------------------------------------------
+  - OpenBao rotation is manual (rotate + `server rewrap`); PII keys cannot be rotated.
+  - The demo OpenBao unseals with one key kept on a Docker volume, no TLS, single node (dev setup).
+  - If the OpenBao data is lost, all secrets are unrecoverable - back it up (file 13).
+  - Unwrapped project keys are cached in memory for ~60 s.
+  - No MFA/SSO/password-reset/email verification.
+  - The server decrypts secrets (it is not zero-knowledge / end-to-end encrypted).
+  - JWT secret rotation invalidates sessions but is not automated.
+  - The JWT access token contains the user's email; webhook payloads and invitation emails also
+    carry emails by design.
+  - Rate limiting fails open if Redis is down.
+  - Dev compose has TLS off and publishes Postgres/Redis/Kafka ports; production needs
+    TLS termination, private networking, and no published data-store ports.
+  - Demo credentials in .env are for local use only.

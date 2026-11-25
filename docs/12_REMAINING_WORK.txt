@@ -1,0 +1,215 @@
+12 - REMAINING WORK
+===================
+NOTE: This is the owner's INTERVIEW / RESUME PROJECT. Section E says whether to show it
+and how. Sections A-D list what is missing and what the owner must do personally.
+
+QUICK ANSWER - WHAT IS LEFT FOR YOU, AND HOW LONG IT WILL TAKE
+==============================================================
+Everything in the product list is built and tested (including OpenBao and PII encryption).
+What is left is (1) things only you can do, (2) engineering upgrades that make the project
+stronger, and (3) big features that are optional or out of scope.
+
+HOW TO READ THE TIMES
+  "Hours" = focused working hours for YOU (you are learning the code and tools while building).
+  "Part-time days" = hours / 4  (assuming ~4 focused hours per day alongside other commitments).
+  Ranges include debugging and re-running the tests. They are estimates, not promises.
+  An experienced Go developer would need roughly half of each figure.
+
+1) MUST DO BEFORE YOU SHOW IT  (no coding - but required)
+  Task                                                                  Hours      Part-time days
+  --------------------------------------------------------------------  ---------  --------------
+  Security hygiene: change your password, back up the OpenBao volumes,
+    generate new MASTER_KEY/JWT_SECRET for any real deployment           1-2        <1
+  Publish: git init, check .env is ignored, LICENSE, push to GitHub        1-2        <1
+  Screenshots + a 60-90 second demo video embedded in the README           2-4        1
+  Verify GitHub / Vercel / Railway sync with real tokens (or drop the
+    claim); run the CLI and scripts/e2e.py yourself once                   3-5        1-1.5
+  Learn it well enough to defend it: read docs 02-04 and 13, trace the 6
+    key flows in the code, practise the demo and the Q&A in file 11        10-18      2.5-4.5
+  SUBTOTAL                                                                 17-31      ~4-8 days
+
+2) ENGINEERING UPGRADES  (code you build; best value first)
+  #  Task                                                                Hours    Part-time days  Why it matters
+  -- ------------------------------------------------------------------  -------  --------------  ---------------------------
+  1  GitHub Actions CI: go vet, go test, frontend build                  2-4      <1              Shows you ship with checks
+  2  schema_migrations table + numbered migrations                       3-5      1               Fixes a known design weakness
+  3  Pagination on lists (members, tokens, secrets) API + UI controls    5-8      1.5-2           Needed beyond a demo
+  4  Refactor ONE module to handler -> service -> repository             8-14     2-3.5           Answers the layering critique
+  5  Password reset + change password (email flow)                       8-12     2-3             Expected in any real product
+  6  TOTP MFA (enrol, verify, recovery codes)                            8-14     2-3.5           Strong security talking point
+  7  Deploy to a VPS with Caddy (HTTPS), scheduled backups               3-6      1-1.5           A live link recruiters can open
+  8  Durable webhook/sync jobs (queue + worker, survives restarts)       8-14     2-3.5           Fixes in-memory job weakness
+  9  Prune dead CSS from earlier iterations                              1-2      <1              Housekeeping
+  SUBTOTAL (items 1-9)                                                   46-79    ~12-20 days
+
+3) OPTIONAL / STRETCH  (only if you have the time or the topic comes up)
+  Task                                                                   Hours      Part-time days
+  --------------------------------------------------------------------  ---------  --------------
+  Handler-level Go tests for the whole api package                        20-32      5-8
+  Refactor the whole api package to handler/service/repository            50-80      2-3 weeks
+  Production-harden OpenBao (auto-unseal or Shamir shares, TLS, 3-node
+    raft, revoke root token, scheduled snapshots)                         6-12       1.5-3
+  Automatic OpenBao key-rotation job + alert                              3-5        1
+  PII key rotation tool (key versions + re-encrypt all rows)              10-16      2.5-4
+  Propagate secret DELETE to GitHub/Vercel/Railway                        4-8        1-2
+  Dynamic secrets for MySQL (second provider)                             6-10       1.5-2.5
+  SSO via OIDC (Google/Okta) login                                        16-28      4-7
+  Organisation/account deletion + session list and revoke-all             8-14       2-3.5
+
+4) NOT WORTH BUILDING FOR THIS PROJECT  (mention as future work only)
+  Multi-region / HA (infrastructure, 1-2 weeks, no code value for a portfolio), end-to-end /
+  zero-knowledge encryption, privileged access management, certificate management
+  (each is weeks to months and a different product).
+
+PLANS - PICK ONE
+  A) "Safe to show"       = Section 1 only                              ~4-8 part-time days
+  B) "Strong resume"      = Section 1 + upgrades 1, 2, 3, 4, 7           ~2-3.5 weeks part-time
+  C) "Stand-out"          = Section 1 + all of section 2                 ~3-5.5 weeks part-time
+  Recommendation: do Plan A first and start applying; add upgrades 1, 2, 7 (CI, migrations, live
+  deploy) while you apply - they take about 2-4 days together and are the most visible to a reviewer.
+
+A. NOT BUILT (features)
+-----------------------
+  - Multi-region / high availability (infrastructure work; the API itself is stateless)
+  - SSO (SAML/OIDC), MFA/2FA, "forgot password", email verification, change password
+  - End-to-end / zero-knowledge encryption, privileged access management, certificate management
+  - Production-hardened OpenBao (auto-unseal, TLS, multi-node raft, root token revoked) and
+    scheduled/automatic key rotation (rotation works but is manual: rotate + `server rewrap`)
+  - Rotating the PII keys (re-encrypting every personal-data row); only their wrapping rotates
+  - Dynamic secrets for databases other than PostgreSQL
+  - Integrations propagate adds/updates only (deleting a secret does not delete it remotely)
+  - Webhook/integration jobs are in-memory (not durable across restarts)
+  - Organisation deletion and account deletion; session list / revoke-all UI
+
+B. ENGINEERING DEBT  (what a reviewer may point out - see 04_LOW_LEVEL_DESIGN.txt K)
+-------------------------------------------------------------------------------
+  1. No service/repository layering in internal/api (SQL lives in handlers)
+  2. No schema_migrations table / versioned migrations
+  3. No CI (GitHub Actions) running `go test` and the e2e script
+  4. No Go tests for HTTP handlers; no frontend tests
+  5. No pagination on lists
+  6. Dead CSS from earlier iterations remains in styles.css (safe to prune)
+  7. Landing/auth use Inter, the app uses Geist (intentional, but two font stacks)
+
+C. THINGS YOU MUST DO YOURSELF
+------------------------------
+  Security / hygiene (do these first)
+   [ ] CHANGE YOUR PASSWORD for the account you used in the app - it was typed into this
+       chat session, so treat it as exposed.
+   [ ] Generate NEW MASTER_KEY and JWT_SECRET before any real deployment (the ones in .env
+       are dev values). Changing MASTER_KEY makes existing encrypted data unreadable, so do it
+       on a fresh database or re-seed.
+   [ ] Never commit .env. This folder is NOT a git repository yet.
+   [ ] BACK UP the OpenBao volumes (vaultly_baodata and vaultly_baoboot) - see file 13. The project
+       keys are now wrapped by OpenBao; if that data is lost every secret is unrecoverable.
+       Never run `docker compose down -v`.
+   [ ] Optional: once you are confident, remove MASTER_KEY from .env (keep a copy until then).
+
+  Publish the project
+   [ ] cd vaultly && git init && git add -A && git status   (confirm .env is NOT listed)
+   [ ] Commit, create a GitHub repo, push.
+   [ ] Add a LICENSE file (MIT is typical) and delete .claude/ if you don't want it public.
+   [ ] Take screenshots (landing, dashboard, project, members) and a 60-second demo GIF/video
+       and embed them in README.md - recruiters look at these first.
+   [ ] Pin the repo on your GitHub profile; put the link and the resume bullets from
+       11_RESUME_AND_INTERVIEW_GUIDE.txt on your resume.
+
+  Verify what couldn't be verified here
+   [ ] Test the GitHub integration with a real personal access token and a throwaway repo.
+   [ ] Test Vercel and Railway with real tokens, or remove those claims from your resume.
+   [ ] Try the CLI end to end on your machine.
+   [ ] Run the e2e script yourself once so you have seen it pass.
+
+  Learn it well enough to defend it
+   [ ] Read docs 02, 03, 04 and trace these flows in the code: login+refresh, putSecret,
+       the rate limiter, the audit pipeline, a service-token fetch, a dynamic lease.
+   [ ] Be able to explain section K (honest design review) in your own words.
+   [ ] Practise the demo script and the interview Q&A in 11_...
+
+  Optional upgrades, best value first
+   [ ] Add GitHub Actions: run `go vet`, `go test`, build the frontend.
+   [ ] Refactor one package (e.g. webhooks) into handler -> service -> repository to show the pattern.
+   [ ] Add a schema_migrations table and numbered migrations.
+   [ ] Implement password reset and TOTP MFA.
+   [ ] Deploy to a small VPS with Caddy for automatic HTTPS and share a live link.
+
+D. WHAT WAS VERIFIED IN THIS BUILD
+----------------------------------
+  - 36 Go tests pass (incl. a live test against a real OpenBao); 98/98 end-to-end checks pass
+    against the Docker stack, including OpenBao key wrapping and PII-at-rest checks.
+  - The OpenBao migration (rewrap) and key rotation were run against the real data in this repo;
+    a backend started WITHOUT MASTER_KEY could still log in and decrypt old secrets.
+  - All UI screens were rendered in a real browser and screenshotted (no automated UI tests).
+
+E. INTERVIEW / RESUME PROJECT - SHOULD YOU SHOW IT?
+---------------------------------------------------
+SHORT ANSWER: Yes, show it - but only after you can explain it, and be honest about how it
+was built.
+
+Why it is worth showing
+  - It is a real, working system (auth, encryption, Kafka, Redis, Postgres, React, Docker),
+    not a tutorial clone.
+  - It gives you concrete things to talk about: envelope encryption, a Redis+Lua rate limiter,
+    a Kafka audit pipeline with a fallback, per-environment RBAC, dynamic DB credentials.
+  - It has tests (36 Go tests + 98 end-to-end checks) and written docs, which most
+    student/portfolio projects do not.
+
+Show it ONLY IF you can do all of these
+  [ ] Run it from scratch on your machine (docker compose up) without help.
+  [ ] Explain, without notes: how a secret is encrypted, how the rate limiter works, how an
+      audit event travels through Kafka, how a service token is checked.
+  [ ] Make one small change live (e.g. add a field to a secret, or a new rate-limit rule) and
+      show it works. Interviewers often ask this to confirm you understand the code.
+  [ ] Answer "what would you improve?" using section K of 04_LOW_LEVEL_DESIGN.txt.
+  If you cannot yet, spend a few days on docs 02-04 first. Showing a project you cannot explain
+  hurts you more than not showing one.
+
+Be honest about AI assistance
+  - This project was built with an AI coding assistant. If you are asked who wrote it or how,
+    say so plainly: "I designed the features and made the decisions, and used an AI assistant
+    to speed up implementation. I've read and tested it and can walk you through any part."
+  - Do NOT say you personally typed every line. Being caught overstating is the real risk;
+    using AI tools is normal and many teams expect it.
+  - Only claim what you can defend. Use the "THINGS NOT TO CLAIM" list in
+    11_RESUME_AND_INTERVIEW_GUIDE.txt.
+
+How to present it
+  - Resume: one project entry + the GitHub link (bullets are in file 11).
+  - GitHub: README with 3-4 screenshots and a short demo video/GIF at the top; docs/ folder
+    visible. Pin the repo.
+  - In the interview: offer a 5-minute demo first (script in file 11), go into code only when
+    asked. Lead with your 2-3 strongest points and mention the weaknesses yourself before they do.
+  - Before publishing screenshots, remove anything personal (your email address in the sidebar
+    or members list) and make sure no real credentials appear. The seeded keys are fake.
+
+Do NOT show it if
+  - It contains real secrets, real customer/employer data, or your real .env (keep .env out of git).
+  - An employer's rules forbid AI-assisted work for the role/assessment you are applying to.
+
+F. TIME ESTIMATES IF YOU BUILD THESE YOURSELF
+---------------------------------------------
+(OpenBao and PII encryption are ALREADY BUILT in this repo - see file 13. The estimates for them
+ below are for rebuilding them from scratch yourself, e.g. to learn or to explain them.)
+Assumptions: part-time work (~4 focused hours/day), you have read docs 02-04, and you are learning
+the new tools while building. "Experienced" = a Go developer who already knows Vault/OpenBao.
+Estimates are ranges, not promises; debugging and re-testing are included.
+
+  Item                                                         Experienced     You
+  -----------------------------------------------------------  ------------    ---------------
+  OpenBao key provider (KeyProvider interface, Transit client,
+    Docker setup + unseal, token renewal, rewrap command,
+    DEK cache, tests)                                          4-6 hours       1.5-2.5 days
+  PII column encryption (email, name) with blind index,
+    startup backfill, ~25 call sites, audit-log sealing,
+    backup/restore changes, tests                              6-8 hours       2-3 days
+  BOTH of the above, plus docs and re-running e2e              ~1.5 days       4-5 days
+
+  The per-item estimates for everything else are in the QUICK ANSWER at the top of this file
+  (hours and part-time days). Use that table; the old rough figures that were here were replaced
+  to keep the numbers consistent.
+
+  Where the time really goes: understanding the existing code (~25-30%), the data migration and
+  its failure cases (~25%), and tests/debugging (~30%). Typing the code is the smaller part.
+
+  OpenBao and PII encryption are done, so the suggested order is now: Section 1 -> CI -> live deploy
+  -> migrations table -> pagination -> one-module refactor (see PLANS at the top).

@@ -1,0 +1,118 @@
+03 - MODULES EXPLAINED
+======================
+Every package and file, in plain words. Paths are relative to vaultly/.
+
+BACKEND ENTRY POINTS
+--------------------
+backend/cmd/server/main.go (+ keys.go)
+  Loads config, builds the KeyProvider (keys.go: local or OpenBao, waits until OpenBao answers),
+  connects Postgres (retries ~30 s), runs migrations, loads the PII keys and backfills old
+  plaintext rows, connects Redis, creates the audit service and starts
+  its consumer, builds the API server, starts the janitor, serves HTTP, and shuts
+  down gracefully on SIGTERM.
+
+backend/cmd/vaultly/main.go
+  The CLI. `pull` prints secrets (dotenv/shell/json), `run -- cmd` injects them
+  as environment variables into a child process, `set KEY VALUE` writes one.
+  Uses VAULTLY_TOKEN and VAULTLY_URL.
+
+backend/internal/config
+  Reads environment variables into a Config struct. JWT_SECRET is mandatory (>= 32 chars);
+  MASTER_KEY is mandatory only for KEY_PROVIDER=local; KEY_PROVIDER=openbao needs BAO_ADDR + a token.
+  Also: DATABASE_URL, REDIS_URL, KAFKA_BROKERS, SMTP_*, APP_URL, CORS_ORIGINS,
+  WEBHOOK_ALLOW_PRIVATE.
+
+backend/internal/db
+  Connect() with retry; Migrate() runs every embedded migrations/*.sql in name
+  order (001_init.sql, 002_features.sql, 003_encryption.sql). Migrations are idempotent (IF NOT EXISTS).
+
+CRYPTO AND AUTH
+---------------
+backend/internal/crypto  (crypto.go, transit.go)
+  KeyProvider interface = the root of trust: NewDEK / UnwrapDEK / Rewrap.
+    Local    wraps with MASTER_KEY from the environment.
+    Transit  talks to OpenBao's Transit engine over HTTP (the root key never leaves OpenBao).
+    Hybrid   OpenBao for new keys, MASTER_KEY only to read keys not yet migrated.
+  Encrypt/Decrypt = AES-256-GCM, output nonce||ciphertext, with "additional data".
+
+backend/internal/pii  (pii.go)
+  Encrypts personal data (emails, names, actor labels). Box.Seal/Open (AES-GCM, field name as
+  additional data), Box.Index (HMAC blind index), Label/OpenLabel, Load (creates the two keys in
+  app_keys, wrapped by the KeyProvider), Backfill (encrypts old plaintext rows at startup).
+
+backend/internal/auth  (auth.go)
+  HashPassword/CheckPassword (bcrypt cost 12). NewAccessToken/ParseAccessToken
+  (HS256 JWT, 15 min, issuer "vaultly"). Refresh tokens: random 32 bytes, stored in
+  Redis under sha256(token) for 7 days, consumed with GETDEL so each works once.
+
+backend/internal/ratelimit
+  limiter.go          Limiter interface + Result{Allowed, Remaining, ResetAt}
+  sliding_window.go   Redis implementation (runs lua/sliding_window.lua atomically)
+  lua/                the script: trim old entries, count, reject or add, set expiry
+
+AUDIT, MAIL, WEBHOOKS
+---------------------
+backend/internal/audit  (audit.go)
+  Event struct; Service.Publish (Kafka, with DB fallback); Service.Run (create topic,
+  consume, insert, commit, notify); Subscribe() lets other modules react to events.
+
+backend/internal/mail  (mail.go)
+  Sender interface; SMTP implementation (multipart text+HTML) and a Log sender that
+  prints the email when SMTP_HOST is unset. Header-injection guarded.
+
+backend/internal/webhook  (webhook.go)
+  Dispatcher: finds a project's matching hooks (glob match on event names), signs
+  the JSON body (HMAC-SHA256 over "timestamp.body"), POSTs with retries, records each
+  delivery. NewClient() blocks loopback/private addresses at dial time and refuses
+  redirects (SSRF protection).
+
+INTEGRATIONS AND DYNAMIC SECRETS
+--------------------------------
+backend/internal/integrations  (integrations.go)
+  Provider interface {Validate, Push, Public}. GitHub (encrypts each value with the
+  repo's public key using libsodium sealed boxes, supports environment secrets),
+  Vercel (bulk upsert of env vars), Railway (GraphQL upsert). Base URLs are fields
+  so tests point them at fake servers.
+
+backend/internal/dynamic  (postgres.go)
+  Provider interface {Validate, Create, Revoke, ConnectionURL}. Postgres creates a
+  login role with a password and VALID UNTIL, runs admin-defined GRANT templates,
+  and on revoke terminates sessions, DROP OWNED BY, DROP ROLE. Role names are
+  generated (v_ + 16 chars) and validated by regex before use in SQL.
+
+backend/internal/backup  (backup.go)
+  Seal/Open: gzip + scrypt key + AES-GCM. File = "VLTYBK1" | salt | nonce | data.
+
+THE API PACKAGE  (backend/internal/api)  -  where the business logic lives
+--------------------------------------------------------------------------
+server.go       Server struct (dependencies), Router() with ALL routes, middleware
+                (CORS, security headers, userAuth incl. personal tokens, tokenAuth
+                incl. IP allowlist), helpers: project(), orgRole(), dek(), record().
+ratelimit.go    rateLimit(name, limit, window, keyFunc) middleware + key functions.
+auth.go         register, login, refresh, logout, me.
+orgs.go         orgs, stats (dashboard data), members, projects, environments, audit list.
+secrets.go      The core. writeSecret (versioned, transactional), list/get/put/delete,
+                search, rollback, rotate, import/export, reference resolver, collect().
+envroles.go     envRole()/needEnv(): per-environment permission resolution.
+users.go        loadUser, userIDByEmail (blind index), sealLabel/openLabel helpers.
+dekcache.go     short-lived in-memory cache of unwrapped project keys.
+tokens.go       service tokens (+IP allowlist), personal tokens, machine API handlers.
+invites.go      invitations, per-environment role editing.
+webhooks.go     webhook CRUD, test ping, delivery history.
+integrations.go integration CRUD, sync, debounced auto-sync subscriber.
+dynamic.go      dynamic-secret configs, leases, revocation, token lease endpoint.
+backup.go       backup export and restore.
+janitor.go      periodic revocation of expired leases and expiry announcements.
+
+OPENBAO SETUP
+-------------
+openbao/bootstrap.sh   sidecar loop: init once, unseal after restarts, enable Transit, create key
+                       "vaultly", write a least-privilege policy, issue the app token to a shared volume.
+
+FRONTEND  (frontend/src)  - see 08_FRONTEND_GUIDE.txt for detail
+--------------------------------------------------------------
+main.jsx, App.jsx        bootstrap + routes          api.js     fetch wrapper + token refresh
+auth.jsx                 session/workspace context   styles.css the whole design system
+components/              Shell (sidebar+topbar), CommandPalette, ui (icons, modal, menu)
+pages/                   Landing, AuthPages, Dashboard, Projects, Project (+ project/*),
+                         Members, Audit, Settings, Invite

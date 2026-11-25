@@ -1,0 +1,101 @@
+01 - PROJECT OVERVIEW
+=====================
+
+WHAT PROBLEM IT SOLVES
+----------------------
+Teams keep API keys, database passwords and .env files in chat, repos and
+laptops. Vaultly is one place to store them encrypted, give each person and each
+machine only the access they need, see who touched what, and hand secrets to
+apps at runtime.
+
+FEATURE LIST (all implemented)
+------------------------------
+Core
+  - Register / login (JWT access token + rotating refresh token in httpOnly cookie)
+  - Workspaces (organisations), roles: admin / developer / viewer
+  - Projects, each with environments (dev / staging / prod by default, add your own)
+  - Folders: secrets live at paths such as /stripe or /database/replica
+  - Encrypted secrets (envelope encryption, AES-256-GCM)
+  - Key service: the key that wraps every project key lives in OpenBao (Transit engine)
+  - Personal data (emails, names, 'who did it' labels) encrypted in the database, with a blind
+    index so login/uniqueness still work
+  - Version history on every change, one-click rollback, random-value rotation
+  - .env import and export (dotenv / shell / json)
+  - Service tokens (machines): scoped to ONE environment and ONE path prefix
+  - Audit log of every login, read, write, export, token use
+  - CLI: vaultly pull | run | set
+  - React dashboard + marketing landing page + login/signup
+
+Security
+  - Rate limiting on every route (Redis sliding window, Lua script)
+  - Secret expiry: expired secrets are no longer served to machines
+  - IP allowlists on service tokens (denials are audited)
+
+Team and access
+  - Email invitations (SMTP; Mailpit in dev) with single-use, expiring links
+  - Per-environment roles: a member can be "no access / viewer / developer" in
+    prod while being developer elsewhere
+  - Personal access tokens: call the API as yourself without a browser session
+
+Secret management
+  - References: DATABASE_URL = postgres://u:p@${DB_HOST}:5432/app
+  - Tags and filtering
+  - Search across paths and environments
+
+Integrations
+  - Webhooks: HMAC-signed HTTP callbacks, retried, SSRF-protected
+  - Sync to GitHub Actions secrets, Vercel env vars, Railway variables
+  - Dynamic secrets: on-demand short-lived PostgreSQL credentials that are
+    created per request and dropped automatically at expiry
+
+Operations
+  - /healthz endpoint
+  - Encrypted backup and restore of a whole workspace (passphrase protected)
+
+NOT IMPLEMENTED (see 12_REMAINING_WORK.txt)
+  Multi-region / HA, SSO, password reset, MFA, E2EE, PAM, certificates.
+
+TECH STACK
+----------
+  Backend    Go + Gin (HTTP), pgx (PostgreSQL), go-redis, segmentio/kafka-go,
+             golang-jwt, x/crypto (bcrypt, scrypt, nacl/box)
+  Frontend   React 18, Vite, react-router-dom 6, plain CSS (no UI library)
+  Data       PostgreSQL (system of record), Redis (sessions + rate limits),
+             Kafka (audit event stream), OpenBao (root key service)
+  Infra      Docker + Docker Compose, nginx (serves UI and proxies /api)
+  Fonts      Geist (app), Inter (landing/auth), JetBrains Mono
+
+REPOSITORY LAYOUT
+-----------------
+  vaultly/
+    docker-compose.yml        postgres, redis, kafka, mailpit, openbao (+bootstrap), backend, frontend
+    openbao/bootstrap.sh      initialise/unseal OpenBao, create the Transit key and app token
+    .env / .env.example       MASTER_KEY and JWT_SECRET (never commit .env)
+    README.md                 short quick-start
+    docs/                     these files
+    scripts/                  e2e.py (87 live checks), seed scripts, webhook receiver
+    backend/
+      cmd/server/main.go      API process entry point
+      cmd/vaultly/main.go     CLI
+      internal/
+        api/                  HTTP handlers + middleware (the biggest package)
+        audit/                Kafka producer/consumer + subscriber hook
+        auth/                 passwords, JWT, refresh tokens
+        backup/               passphrase-sealed backup file format
+        config/               environment configuration
+        crypto/               envelope encryption + KeyProvider (local / OpenBao Transit)
+        pii/                  field encryption + blind index for personal data
+        db/                   connection + SQL migrations (embedded)
+        dynamic/              dynamic-secret provider (PostgreSQL)
+        integrations/         GitHub / Vercel / Railway providers
+        mail/                 SMTP sender
+        ratelimit/            sliding-window limiter
+        webhook/              signed delivery with retries
+    frontend/
+      src/                    React app (see 08_FRONTEND_GUIDE.txt)
+      nginx.conf              static hosting + /api reverse proxy
+
+SIZE (approximate)
+------------------
+  Go source (no tests)   ~6,100 lines      Go tests   ~840 lines (36 tests)
+  REST endpoints          66                SQL tables 18

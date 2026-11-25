@@ -1,0 +1,118 @@
+11 - RESUME AND INTERVIEW GUIDE
+===============================
+
+PROJECT TITLE (pick one)
+  Vaultly - Self-hosted Secrets Management Platform
+  Go · Gin · PostgreSQL · Redis · Kafka · React · Docker
+
+RESUME BULLETS  (every claim below is true and demonstrable in this repo)
+-------------------------------------------------------------------------
+  - Built a self-hosted secrets manager (Go, Gin, PostgreSQL, Redis, Kafka, OpenBao, React) with 66
+    REST endpoints, a CLI, and a web dashboard; the whole stack runs from one `docker compose up`.
+  - Designed envelope encryption behind a KeyProvider interface: per-project data keys seal every
+    value with AES-256-GCM bound to its project (AAD), and are wrapped by a root key held in
+    OpenBao's Transit engine (the root key never leaves the key service); added key rotation
+    via a `rewrap` command and a migration path from the old env-var master key.
+  - Encrypted personal data (emails, names, audit actors) at the application layer with AES-GCM and
+    an HMAC blind index, so login and uniqueness still work; verified by an end-to-end check that
+    a full database dump contains no email addresses.
+  - Implemented a Redis + Lua sliding-window rate limiter (atomic, multi-instance safe) behind a
+    Limiter interface, applied per IP, user and token, with standard X-RateLimit headers.
+  - Streamed audit events through Kafka (keyed per tenant for ordering) to an idempotent consumer
+    group, with a direct-to-DB fallback so no audit record is dropped when the broker is down.
+  - Built role-based access with per-environment overrides, scoped machine tokens (environment +
+    path + optional IP allowlist), personal access tokens, and email invitations.
+  - Added dynamic secrets: on-demand short-lived PostgreSQL credentials that are revoked
+    automatically at expiry by a background janitor, and when their project is deleted.
+  - Shipped HMAC-signed webhooks with retries and SSRF protection, secret references with
+    cycle detection, expiry, tags, cross-environment search, and encrypted backup/restore.
+  - Wrote 36 Go tests (including a live OpenBao test) plus a 98-check end-to-end suite; found and
+    fixed bugs it exposed (orphaned database roles on project delete, permission edge cases).
+
+SHORT VERSION (2 lines)
+  Secrets-management platform in Go/React with OpenBao-backed envelope encryption, PII encryption,
+  Kafka audit pipeline, Redis rate limiting, per-environment RBAC, dynamic DB credentials, Dockerised.
+
+ELEVATOR PITCH (30 seconds)
+  "Teams leak secrets through chat and .env files. I built a self-hosted vault: secrets are
+  encrypted with per-project keys wrapped by a master key, access is scoped by role and
+  environment, every access is audited through Kafka, and apps fetch secrets with scoped tokens
+  or short-lived dynamic credentials."
+
+DEMO SCRIPT (5 minutes)
+  1. Landing page -> sign up (shows the security story).
+  2. Create a project; paste a .env into Import; show tags/folders.
+  3. Edit DATABASE_URL to use ${PG_HOST}; reveal shows the resolved value.
+  4. Create a service token limited to /stripe in staging; curl the machine API with it.
+  5. Invite someone with prod = "No access"; show Mailpit email; accept; show prod hidden.
+  6. Dynamic secret: generate DB credentials, log in with them, revoke, show login fails.
+  7. Audit log + dashboard; open Kafka consumer logs; stop Kafka and show the fallback.
+  8. Settings -> backup -> delete project -> restore.
+  9. Open Beekeeper/psql: show users.email_enc and encrypted_dek = 'vault:v2:...' (ciphertext only),
+     then show OpenBao at http://localhost:8200.
+
+LIKELY INTERVIEW QUESTIONS AND GOOD ANSWERS
+-------------------------------------------
+Q: Why envelope encryption instead of encrypting everything with the master key?
+A: Separate keys per project limit blast radius, and rotating the master key only means
+   re-wrapping a few small keys, not re-encrypting every secret. Binding the project id as AAD
+   stops ciphertext being replayed into another project.
+
+Q: How does your rate limiter work and why Lua?
+A: A Redis sorted set per key holds request timestamps. A Lua script trims old entries, counts,
+   and either rejects or records - atomically, so concurrent requests can't both slip under the
+   limit. It uses Redis's own clock so multiple API instances agree. Rejected requests are not
+   recorded, so attackers can't extend their own block. It fails open if Redis is down.
+
+Q: Why Kafka for audit logs? Isn't a table insert enough?
+A: It takes the write off the request path, preserves per-tenant ordering (key = org), and lets
+   consumers be scaled or replayed. The consumer is idempotent (ON CONFLICT on a producer-assigned
+   id) so at-least-once delivery is safe. I added a DB fallback so Kafka being down doesn't lose
+   audit data. Honest trade-off: it's extra infrastructure for a small system.
+
+Q: Why OpenBao, and what does it actually do in your system?
+A: It is the root of trust. Vaultly never holds the key that protects the project keys; it asks
+   OpenBao's Transit engine to wrap and unwrap small data keys. Secret values are still encrypted
+   locally, so reads don't hit OpenBao each time (a short in-memory cache helps). Rotating the
+   OpenBao key means 'rewrap' - OpenBao re-wraps the stored keys, so no secret is re-encrypted.
+   The app's token can only call four Transit endpoints for one key (least privilege).
+
+Q: How can you encrypt emails and still log users in?
+A: A blind index: store the sealed email plus HMAC-SHA256(secretKey, lowercase email). Login
+   computes the HMAC and looks that up, then decrypts and checks the bcrypt password. A plain hash
+   would be brute-forceable; the keyed HMAC is not. Trade-off: no substring search in SQL.
+
+Q: What happens if OpenBao is lost?
+A: After migration it is the only thing that can unwrap project keys, so its data must be backed up
+   (and in production: auto-unseal, TLS, multi-node). I documented this and the restore story.
+
+Q: How do you stop one user reading another team's secrets?
+A: Every query is joined through memberships; non-members get 404. Roles are checked per
+   environment (overrides can restrict or grant). Search, export, references and the project
+   endpoint all apply the same environment check so nothing leaks via side channels.
+
+Q: What happens if two people edit the same secret at once?
+A: The write runs in a transaction with SELECT ... FOR UPDATE on that row, so writers serialise
+   and versions increment without collision.
+
+Q: How do dynamic secrets get cleaned up if the server crashes?
+A: Leases are rows with expires_at, and the Postgres role itself has VALID UNTIL, so it stops
+   working even if the janitor is down; the janitor drops it when it comes back.
+
+Q: How do you prevent webhook SSRF?
+A: The HTTP client's dialer checks the RESOLVED IP and refuses loopback/private/link-local
+   addresses (so DNS rebinding tricks fail), and redirects aren't followed.
+
+Q: What would you improve? (the honest answer scores well)
+A: Extract a service + repository layer so handlers are unit-testable; add versioned migrations,
+   CI, pagination, a KMS-backed master key, MFA/SSO and a durable queue for webhook delivery.
+
+THINGS NOT TO CLAIM
+  - Not "production ready" or "zero-knowledge/E2EE" (the server decrypts values).
+  - Not "tested against live GitHub/Vercel/Railway" (mock servers only) unless you test it.
+  - Not "high availability" (single Kafka broker, single Postgres, single-node OpenBao in compose).
+  - Not a "production-hardened OpenBao setup": the demo unseals with one key on a Docker volume.
+  - Don't quote metrics you haven't measured (requests/second, latency, users).
+
+NUMBERS YOU CAN SAFELY QUOTE
+  66 REST endpoints | 18 tables | ~6.1k lines Go | 36 Go tests + 98 e2e checks | 9 containers
