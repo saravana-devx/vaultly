@@ -157,6 +157,14 @@ make up`}</Cmd>
               <li><b>Passwords</b> use bcrypt. <b>Tokens</b> are stored as hashes and shown once. Sessions use a 15-minute access token and a rotating refresh cookie.</li>
               <li><b>Limits:</b> the running server holds the keys, so a compromised server can read what it serves. The hosted workspace is a free demo, so please do not store real production secrets in it.</li>
             </ul>
+            <h3>Who encrypts what</h3>
+            <p>Vaultly does its own encryption: the backend encrypts every secret value with AES-256-GCM, using a key that belongs to one project. OpenBao never sees a secret value. It only generates those project keys and holds the root key that wraps them. This is envelope encryption, the same pattern hosted secret managers use with a cloud key service. Here the key service is self-hosted.</p>
+            <p>OpenBao is asked only to unwrap a project key, never for each secret, and unwrapped keys are cached for 60 seconds. Reads do not wait on it, and a short outage does not stop the app.</p>
+            <h3>Without OpenBao</h3>
+            <p>For a simple self-hosted install you can skip it: the root key then comes from <code>MASTER_KEY</code> in the environment. This is simpler but protects the root key less well, so use OpenBao for production.</p>
+            <Cmd>{`KEY_PROVIDER=local
+MASTER_KEY=$(openssl rand -base64 32)`}</Cmd>
+            <p>Either way, back up the root key (the OpenBao volumes, or <code>MASTER_KEY</code>). If it is lost, every secret becomes unreadable.</p>
             <p>The reasoning and the exact list of fields are in the <a href={`${GITHUB}/blob/main/docs/13_OPENBAO_AND_PII_ENCRYPTION.txt`} target="_blank" rel="noreferrer">encryption notes</a>.</p>
           </Section>
 

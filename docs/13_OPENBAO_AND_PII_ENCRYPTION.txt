@@ -15,6 +15,33 @@ What did NOT change
   OpenBao is used only for the small key-wrapping calls, so reading a secret does not
   call OpenBao for every value (see "DEK cache" below).
 
+Design choice: who encrypts what, and why OpenBao is not in the data path
+  Vaultly does its own encryption: the backend encrypts every secret value with AES-256-GCM
+  using a per-project key (DEK). OpenBao does NOT see secret values. Its only job is to protect
+  the keys: it generates each DEK and stores the root key (KEK) that wraps them.
+    secret value --AES-256-GCM (backend, per-project DEK)--> ciphertext in Postgres
+    DEK          --wrapped by the OpenBao root key-------> projects.encrypted_dek
+  This is envelope encryption, the same pattern Doppler, Infisical and cloud secret managers use
+  with a cloud KMS or HSM. The difference is that the key service here is self-hosted.
+
+  Why not encrypt values with our own key and use OpenBao only for the database?
+    Any "own" scheme still needs a root key stored somewhere. Without OpenBao that is MASTER_KEY
+    in an environment variable, which is the weaker place for it. Splitting the two would not
+    remove the dependency, it would only move the single point of failure to MASTER_KEY.
+  How small the OpenBao dependency is
+    OpenBao is called only to unwrap a project key, never per secret. Unwrapped keys are cached
+    for KEY_CACHE_TTL_SECONDS (60 s), so normal reads do not hit it and short outages are survived.
+
+  Deployment modes
+    KEY_PROVIDER=openbao  (default)  root key lives in OpenBao. Recommended; use for production.
+    KEY_PROVIDER=local               root key is MASTER_KEY from the environment. Fewer moving
+                                     parts for a simple self-hosted or demo install, weaker
+                                     protection of the root key.
+    Hybrid (openbao + MASTER_KEY)    used while migrating: new keys go to OpenBao, old keys are
+                                     still readable with MASTER_KEY.
+  Whichever mode is used, the OpenBao volumes (or MASTER_KEY) must be backed up: losing the root
+  key makes every secret unreadable.
+
 How the pieces fit
   internal/crypto/provider  KeyProvider interface: NewDEK / UnwrapDEK / Rewrap
      Local    MASTER_KEY from the environment (the old behaviour, still supported)

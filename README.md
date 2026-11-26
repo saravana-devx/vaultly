@@ -52,7 +52,7 @@ Caddy gets a Let's Encrypt certificate automatically and only ports 80/443 are p
 
 ## Security model
 
-The root key lives in **OpenBao** (Transit engine) and wraps a random per-project data key; the data key encrypts each value with AES-256-GCM, bound to the project ID. Only wrapped keys and ciphertext reach the database. `internal/crypto.KeyProvider` has a Local (`MASTER_KEY`) and an OpenBao implementation; `server rewrap` moves keys to the current OpenBao key version. Emails, names and audit actors are encrypted too, with an HMAC blind index so login still works — see `docs/13_OPENBAO_AND_PII_ENCRYPTION.txt`. **Back up the OpenBao volumes; losing them makes every secret unreadable.**
+The root key lives in **OpenBao** (Transit engine) and wraps a random per-project data key; the data key encrypts each value with AES-256-GCM, bound to the project ID. Only wrapped keys and ciphertext reach the database. `internal/crypto.KeyProvider` has a Local (`MASTER_KEY`) and an OpenBao implementation; `server rewrap` moves keys to the current OpenBao key version. Emails, names and audit actors are encrypted too, with an HMAC blind index so login still works — see `docs/13_OPENBAO_AND_PII_ENCRYPTION.txt`. **Back up the OpenBao volumes; losing them makes every secret unreadable.** Secret values are encrypted by Vaultly itself; OpenBao only protects the keys, and `KEY_PROVIDER=local` runs without it (see `docs/13_OPENBAO_AND_PII_ENCRYPTION.txt`).
 
 ## CLI
 

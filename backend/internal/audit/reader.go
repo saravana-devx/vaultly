@@ -2,7 +2,9 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,10 +36,14 @@ func (r *Reader) List(ctx context.Context, a principal.Actor, org uuid.UUID, q L
 		FROM audit_logs a LEFT JOIN projects p ON p.id = a.project_id WHERE a.org_id=$1 AND a.created_at < $2`
 	if q.ProjectID != nil {
 		args = append(args, *q.ProjectID)
-		sql += ` AND a.project_id = $3`
+		sql += fmt.Sprintf(` AND a.project_id = $%d`, len(args))
+	}
+	if q.Kind != "" {
+		args = append(args, q.Kind+".%")
+		sql += fmt.Sprintf(` AND a.action LIKE $%d`, len(args))
 	}
 	args = append(args, q.Limit+1)
-	sql += ` ORDER BY a.created_at DESC LIMIT $` + string(rune('0'+len(args)))
+	sql += fmt.Sprintf(` ORDER BY a.created_at DESC, a.id DESC LIMIT $%d`, len(args))
 	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
@@ -73,6 +79,9 @@ func (r *Reader) List(ctx context.Context, a principal.Actor, org uuid.UUID, q L
 	return page, nil
 }
 
+// kindPattern keeps the ?kind= filter to plain action prefixes (letters and underscores only).
+var kindPattern = regexp.MustCompile(`^[a-z_]{1,32}$`)
+
 type Handler struct{ reader *Reader }
 
 func NewHandler(reader *Reader) *Handler { return &Handler{reader: reader} }
@@ -88,6 +97,9 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	if id, err := uuid.Parse(c.Query("project_id")); err == nil {
 		q.ProjectID = &id
+	}
+	if k := c.Query("kind"); kindPattern.MatchString(k) {
+		q.Kind = k
 	}
 	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
 	defer cancel()

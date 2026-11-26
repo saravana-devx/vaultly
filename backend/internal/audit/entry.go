@@ -28,6 +28,7 @@ type Page struct {
 type ListQuery struct {
 	Before    time.Time
 	ProjectID *uuid.UUID
+	Kind      string // action prefix such as "secret" matches secret.create, secret.read, ...
 	Limit     int
 }
 

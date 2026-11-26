@@ -898,3 +898,16 @@ html:has(.docs) { scroll-behavior: smooth; }
 [data-theme='light'] .overlay.cmdk { background: rgba(20, 35, 42, .38); }
 [data-theme='light'] .pal { box-shadow: 0 40px 100px -24px rgba(20,35,42,.45); }
 [data-theme='light'] .pal-row[data-active='true']::before { background: #1BD488; }
+
+/* Audit log table: fixed columns so long actors, paths and project names truncate instead of stretching the table */
+.table.audit { table-layout: fixed; min-width: 880px; }
+.table.audit td { overflow: hidden; }
+.table.audit .cut, .table.audit .c-sub, .table.audit .c-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table.audit .who { min-width: 0; }
+.table.audit .who .av { flex: none; }
+.table.audit .state { max-width: 100%; }
+.table.audit td:last-child { white-space: nowrap; }
+
+/* A table wider than its box scrolls sideways, but must never trap the vertical wheel: let vertical
+   scrolling pass through to the page column (.colmain) while the table is under the pointer. */
+.shell .scroll-x { overscroll-behavior-x: contain; overscroll-behavior-y: auto; }
