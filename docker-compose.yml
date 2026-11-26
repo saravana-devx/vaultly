@@ -1,61 +1,101 @@
+# Vaultly DEV stack:  make up   (or: docker compose up -d --build)
+# Settings come from .env (see .env.example); every ${VAR:-default} below also works without it.
+
+x-backend-env: &backend-env
+  PORT: "8080"
+  APP_URL: ${APP_URL:-http://localhost:3000}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -hex 32)}
+  MASTER_KEY: ${MASTER_KEY:-}
+  KEY_PROVIDER: ${KEY_PROVIDER:-openbao}
+  KEY_CACHE_TTL_SECONDS: ${KEY_CACHE_TTL_SECONDS:-60}
+  BAO_ADDR: http://openbao:8200
+  BAO_TOKEN_FILE: /token/app-token
+  DATABASE_URL: postgres://${POSTGRES_USER:-vaultly}:${POSTGRES_PASSWORD:-vaultly}@postgres:5432/${POSTGRES_DB:-vaultly}?sslmode=disable
+  REDIS_URL: redis://redis:6379/0
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_AUDIT_TOPIC: ${KAFKA_AUDIT_TOPIC:-vaultly.audit}
+  RATELIMITER_URL: http://ratelimiter:8080
+  SMTP_HOST: ${SMTP_HOST:-mailpit}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASS: ${SMTP_PASS:-}
+  SMTP_FROM: ${SMTP_FROM:-no-reply@vaultly.local}
+  WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-true}
+
+x-ratelimiter-env: &ratelimiter-env
+  POSTGRES_HOST: ratelimiter-db
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${RATELIMITER_DB_USER:-ratelimiter}
+  POSTGRES_PASSWORD: ${RATELIMITER_DB_PASSWORD:-ratelimiter}
+  POSTGRES_DB: ${RATELIMITER_DB_NAME:-ratelimiter}
+  REDIS_ADDR: redis:6379
+  SERVER_PORT: "8080"
+
 services:
   postgres:
     image: postgres:16-alpine
-    environment: { POSTGRES_USER: vaultly, POSTGRES_PASSWORD: vaultly, POSTGRES_DB: vaultly }
-    ports: ["5432:5432"]
+    container_name: vaultly-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vaultly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vaultly}
+      POSTGRES_DB: ${POSTGRES_DB:-vaultly}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
-    healthcheck: { test: ["CMD-SHELL", "pg_isready -U vaultly"], interval: 3s, retries: 20 }
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 3s
+      retries: 20
 
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
-    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 20 }
+    container_name: vaultly-redis
+    ports: ["${REDIS_PORT:-6379}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
 
-  # Distributed-rate-limiter, built from its source (read-only) and used by the backend for every
+  # Distributed-rate-limiter, built from its own source and used by the backend for every
   # rate-limit decision. Internal only: its admin API has no auth, so never publish its port.
   ratelimiter-db:
     image: postgres:16-alpine
-    environment: { POSTGRES_DB: ratelimiter, POSTGRES_USER: ratelimiter, POSTGRES_PASSWORD: ratelimiter }
+    container_name: vaultly-ratelimiter-db
+    environment:
+      POSTGRES_USER: ${RATELIMITER_DB_USER:-ratelimiter}
+      POSTGRES_PASSWORD: ${RATELIMITER_DB_PASSWORD:-ratelimiter}
+      POSTGRES_DB: ${RATELIMITER_DB_NAME:-ratelimiter}
     volumes:
       - ./deploy/ratelimiter:/docker-entrypoint-initdb.d:ro
       - ratelimiterdata:/var/lib/postgresql/data
-    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ratelimiter -d ratelimiter"], interval: 3s, retries: 20 }
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 3s
+      retries: 20
 
   ratelimiter:
     build:
-      context: ${RATELIMITER_SRC:-../../Distributed-rate-limiter}
-      dockerfile_inline: |
-        FROM golang:1.26-alpine AS build
-        WORKDIR /src
-        COPY go.mod go.sum ./
-        RUN go mod download
-        COPY . .
-        RUN CGO_ENABLED=0 go build -o /out/ratelimiter ./cmd/server
-        FROM alpine:3.20
-        WORKDIR /app
-        RUN touch .env
-        COPY --from=build /out/ratelimiter /usr/local/bin/ratelimiter
-        CMD ["ratelimiter"]
+      context: ./deploy/ratelimiter
+      dockerfile: Dockerfile.server
+      additional_contexts:
+        src: ${RATELIMITER_SRC:-../../Distributed-rate-limiter}
+    container_name: vaultly-ratelimiter
     environment:
-      POSTGRES_HOST: ratelimiter-db
-      POSTGRES_PORT: "5432"
-      POSTGRES_USER: ratelimiter
-      POSTGRES_PASSWORD: ratelimiter
-      POSTGRES_DB: ratelimiter
-      REDIS_ADDR: redis:6379
-      SERVER_PORT: "8080"
+      <<: *ratelimiter-env
+      POSTGRES_PASSWORD: ${RATELIMITER_DB_PASSWORD:-ratelimiter}
     depends_on:
       ratelimiter-db: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   kafka:
     image: apache/kafka:3.8.0
-    ports: ["9094:9094"]
+    container_name: vaultly-kafka
+    ports: ["${KAFKA_PORT:-9094}:9094"]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_PORT:-9094}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
@@ -67,12 +107,14 @@ services:
 
   mailpit:
     image: axllent/mailpit:v1.21
-    ports: ["8025:8025"]
+    container_name: vaultly-mailpit
+    ports: ["${MAIL_UI_PORT:-8025}:8025"]
 
   # Key service: holds the key that wraps every project key (Transit engine).
   # Data is persisted in the baodata volume. Losing that volume loses the key.
   openbao:
     image: openbao/openbao:2.7.3
+    container_name: vaultly-openbao
     command: server
     cap_add: [IPC_LOCK]
     environment:
@@ -86,10 +128,11 @@ services:
           "listener": { "tcp": { "address": "0.0.0.0:8200", "tls_disable": true } }
         }
     volumes: [baodata:/openbao/file]
-    ports: ["8200:8200"]
+    ports: ["${BAO_PORT:-8200}:8200"]
 
   openbao-bootstrap:
     image: openbao/openbao:2.7.3
+    container_name: vaultly-openbao-bootstrap
     user: "0"
     entrypoint: ["/bin/sh", "/bootstrap.sh"]
     depends_on: [openbao]
@@ -100,37 +143,30 @@ services:
       - baotoken:/token
 
   backend:
-    build: ./backend
-    env_file: .env
-    environment:
-      APP_URL: http://localhost:3000
-      SMTP_HOST: mailpit
-      SMTP_PORT: "1025"
-      SMTP_FROM: no-reply@vaultly.local
-      WEBHOOK_ALLOW_PRIVATE: "true"
-      KEY_PROVIDER: ${KEY_PROVIDER:-openbao}
-      BAO_ADDR: http://openbao:8200
-      BAO_TOKEN_FILE: /token/app-token
-      DATABASE_URL: postgres://vaultly:vaultly@postgres:5432/vaultly?sslmode=disable
-      REDIS_URL: redis://redis:6379/0
-      RATELIMITER_URL: http://ratelimiter:8080
-      KAFKA_BROKERS: kafka:9092
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.server
+    container_name: vaultly-backend
+    environment: *backend-env
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      ratelimiter: { condition: service_started }
+      ratelimiter: { condition: service_healthy }
       kafka: { condition: service_started }
       mailpit: { condition: service_started }
       openbao-bootstrap: { condition: service_started }
     volumes:
       - baotoken:/token:ro
-    ports: ["8080:8080"]
+    ports: ["${API_PORT:-8080}:8080"]
 
   frontend:
-    build: ./frontend
-    depends_on: [backend]
-    ports: ["3000:80"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.web
+    container_name: vaultly-frontend
+    depends_on:
+      backend: { condition: service_healthy }
+    ports: ["${APP_PORT:-3000}:80"]
 
 volumes:
   pgdata:

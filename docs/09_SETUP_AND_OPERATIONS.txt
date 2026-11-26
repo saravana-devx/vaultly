@@ -6,10 +6,23 @@ PREREQUISITES   Docker Desktop (Compose v2). Nothing else is needed to run it.
 FIRST RUN
   cd vaultly
   cp .env.example .env
-  # fill the two values:
-  #   MASTER_KEY=$(openssl rand -base64 32)   (optional once OpenBao is in use; see file 13)
-  #   JWT_SECRET=$(openssl rand -hex 32)
-  docker compose up -d --build      # first start also initialises OpenBao (takes ~20 s)
+  # set JWT_SECRET=$(openssl rand -hex 32). MASTER_KEY is optional once OpenBao is in use (file 13).
+  make up                           # = docker compose up -d --build; first start also initialises OpenBao (~20 s)
+  make down                         # stop (data volumes are kept)        make help   lists every command
+
+THE .ENV FILE  (dev stack; never committed)
+  .env.example lists every setting, and docker-compose.yml reads them as ${NAME:-default}, so a missing
+  line never breaks the stack. Groups: secrets (JWT_SECRET, MASTER_KEY) · application (APP_URL, CORS_ORIGINS,
+  KEY_PROVIDER, KEY_CACHE_TTL_SECONDS, WEBHOOK_ALLOW_PRIVATE) · mail (SMTP_*, Mailpit by default) ·
+  database (POSTGRES_*) · rate-limiter (RATELIMITER_SRC, RATELIMITER_DB_*) · published ports (APP_PORT,
+  API_PORT, POSTGRES_PORT, REDIS_PORT, KAFKA_PORT, MAIL_UI_PORT, BAO_PORT: change one if a port is taken).
+  Production uses deploy/env.prod.example instead.
+
+DOCKERFILES  (one per service, named after it, like the Distributed-rate-limiter project)
+  backend/Dockerfile.server         Go build (cached modules) -> small non-root image with CA certificates + healthcheck
+  frontend/Dockerfile.web           npm ci + vite build -> nginx with healthcheck
+  deploy/ratelimiter/Dockerfile.server   builds the separate rate-limiter project; its source is passed in as the
+                                    named build context "src" (RATELIMITER_SRC: folder in dev, Git URL in prod)
   open http://localhost:3000        # register a user; a workspace is created for you
 
 DAILY USE

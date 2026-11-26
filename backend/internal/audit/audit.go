@@ -29,15 +29,22 @@ type Event struct {
 	Action     string         `json:"action"`
 	Resource   string         `json:"resource"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
-	IP         string         `json:"ip"`
-	At         time.Time      `json:"at"`
+	// Sealed carries the metadata encrypted while the event is stored or in transit; Metadata is empty then.
+	Sealed string    `json:"sealed_metadata,omitempty"`
+	IP     string    `json:"ip"`
+	At     time.Time `json:"at"`
 }
 
 // Sealer hides personal data in events before they are stored or sent through Kafka.
 type Sealer interface {
-	Label(string) string
+	LabelAll(string) string
 	OpenLabel(string) string
+	OpenName(field, s string) string
+	SealJSON(field string, v any) string
+	OpenJSON(field, s string, out any) error
 }
+
+const fMetadata = "audit.metadata"
 
 type Service struct {
 	sealer  Sealer
@@ -68,14 +75,28 @@ func (s *Service) WithSealer(x Sealer) *Service { s.sealer = x; return s }
 
 func (s *Service) seal(e Event) Event {
 	if s.sealer != nil {
-		e.ActorLabel, e.Resource = s.sealer.Label(e.ActorLabel), s.sealer.Label(e.Resource)
+		e.ActorLabel, e.Resource, e.IP = s.sealer.LabelAll(e.ActorLabel), s.sealer.LabelAll(e.Resource), s.sealer.LabelAll(e.IP)
+		if e.Sealed == "" {
+			md := e.Metadata
+			if md == nil {
+				md = map[string]any{}
+			}
+			e.Sealed, e.Metadata = s.sealer.SealJSON(fMetadata, md), nil
+		}
 	}
 	return e
 }
 
 func (s *Service) open(e Event) Event {
 	if s.sealer != nil {
-		e.ActorLabel, e.Resource = s.sealer.OpenLabel(e.ActorLabel), s.sealer.OpenLabel(e.Resource)
+		e.ActorLabel, e.Resource, e.IP = s.sealer.OpenLabel(e.ActorLabel), s.sealer.OpenLabel(e.Resource), s.sealer.OpenLabel(e.IP)
+		if e.Sealed != "" {
+			var md map[string]any
+			if s.sealer.OpenJSON(fMetadata, e.Sealed, &md) == nil {
+				e.Metadata = md
+			}
+			e.Sealed = ""
+		}
 	}
 	return e
 }
@@ -198,9 +219,13 @@ func (s *Service) Close() {
 
 func (s *Service) insert(ctx context.Context, e Event) error {
 	e = s.seal(e)
-	md, _ := json.Marshal(e.Metadata)
-	if e.Metadata == nil {
-		md = []byte("{}")
+	md := e.Sealed
+	if md == "" {
+		raw, _ := json.Marshal(e.Metadata)
+		if e.Metadata == nil {
+			raw = []byte("{}")
+		}
+		md = string(raw)
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO audit_logs (id, org_id, project_id, actor_type, actor_id, actor_label, action, resource, metadata, ip, created_at)

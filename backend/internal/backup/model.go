@@ -27,7 +27,8 @@ type exportSecret struct {
 	UpdatedAt      time.Time       `json:"updated_at"`
 	Versions       []exportVersion `json:"versions"`
 
-	id uuid.UUID
+	id      uuid.UUID
+	tagsRaw string
 }
 
 type exportEnv struct {

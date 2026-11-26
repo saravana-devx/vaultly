@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+# Builds the separate Distributed-rate-limiter project into a small non-root image.
+# The project's source is NOT copied into this repository: compose passes it in as the named build
+# context "src" (a local folder in development, its Git repository in production), so this file can
+# live here without touching that project.
+
+ARG GO_VERSION=1.26
+ARG ALPINE_VERSION=3.20
+
+FROM golang:${GO_VERSION}-alpine AS build
+WORKDIR /src
+
+COPY --from=src go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY --from=src . .
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ratelimiter ./cmd/server
+
+FROM alpine:${ALPINE_VERSION}
+RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app
+WORKDIR /app
+# The service reads its settings from the environment but insists that a .env file exists.
+RUN touch .env && chown app:app .env
+COPY --from=build /out/ratelimiter /usr/local/bin/ratelimiter
+USER app
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1
+CMD ["ratelimiter"]

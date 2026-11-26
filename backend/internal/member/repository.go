@@ -8,11 +8,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vaultly/internal/dberr"
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+// The environment name of a per-environment role is stored sealed; env_slug_hash is what lookups compare.
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
 
 func (r *Repository) List(ctx context.Context, org uuid.UUID) ([]Row, error) {
 	rows, err := r.db.Query(ctx, `SELECT u.id,u.email_enc,u.name_enc,m.role,m.created_at FROM memberships m
@@ -45,6 +50,7 @@ func (r *Repository) EnvOverrides(ctx context.Context, org uuid.UUID) (map[uuid.
 		if err := rows.Scan(&uid, &slug, &role); err != nil {
 			return nil, err
 		}
+		slug = r.box.OpenName("member_env_roles.slug", slug)
 		if out[uid] == nil {
 			out[uid] = map[string]string{}
 		}
@@ -96,7 +102,7 @@ func (r *Repository) EnvRoles(ctx context.Context, org, user uuid.UUID) (map[str
 		if err := rows.Scan(&slug, &role); err != nil {
 			return nil, err
 		}
-		out[slug] = role
+		out[r.box.OpenName("member_env_roles.slug", slug)] = role
 	}
 	return out, rows.Err()
 }
@@ -107,7 +113,7 @@ func (r *Repository) ReplaceEnvRoles(ctx context.Context, org, user uuid.UUID, r
 			return err
 		}
 		for slug, role := range roles {
-			if _, err := tx.Exec(ctx, `INSERT INTO member_env_roles (org_id,user_id,env_slug,role) VALUES ($1,$2,$3,$4)`, org, user, slug, role); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO member_env_roles (org_id,user_id,env_slug,env_slug_hash,role) VALUES ($1,$2,$3,$5,$4)`, org, user, r.box.SealName("member_env_roles.slug", slug), role, r.box.Hash("environments.slug", slug)); err != nil {
 				return err
 			}
 		}

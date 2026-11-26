@@ -56,9 +56,17 @@ type Repository interface {
 	EnvID(ctx context.Context, projectID uuid.UUID, slug string) (uuid.UUID, error)
 }
 
-type Service struct{ repo Repository }
+// Namer opens names that are stored encrypted.
+type Namer interface {
+	OpenName(field, s string) string
+}
 
-func NewService(repo Repository) *Service { return &Service{repo: repo} }
+type Service struct {
+	repo  Repository
+	namer Namer
+}
+
+func NewService(repo Repository, namer Namer) *Service { return &Service{repo: repo, namer: namer} }
 
 // Org returns the caller's workspace role, or a not-found error if they are not a member.
 func (s *Service) Org(ctx context.Context, userID, orgID uuid.UUID, need string) (string, error) {
@@ -80,6 +88,7 @@ func (s *Service) Project(ctx context.Context, userID, projectID uuid.UUID, need
 	if rank[p.Role] < rank[need] {
 		return nil, forbidden(need)
 	}
+	p.Name = s.namer.OpenName("projects.name", p.Name)
 	return p, nil
 }
 
@@ -131,9 +140,18 @@ func (s *Service) EnvID(ctx context.Context, projectID uuid.UUID, slug string) (
 	return s.repo.EnvID(ctx, projectID, slug)
 }
 
-type Repo struct{ db *pgxpool.Pool }
+// Environment names and slugs are stored sealed; slug_hash is what lookups compare.
+type Sealer interface {
+	Namer
+	Hash(field, s string) []byte
+}
 
-func NewRepository(db *pgxpool.Pool) *Repo { return &Repo{db: db} }
+type Repo struct {
+	db  *pgxpool.Pool
+	box Sealer
+}
+
+func NewRepository(db *pgxpool.Pool, box Sealer) *Repo { return &Repo{db: db, box: box} }
 
 func (r *Repo) OrgRole(ctx context.Context, userID, orgID uuid.UUID) (string, error) {
 	var role string
@@ -158,7 +176,7 @@ func (r *Repo) ProjectWithRole(ctx context.Context, userID, projectID uuid.UUID)
 
 func (r *Repo) EnvOverride(ctx context.Context, orgID, userID uuid.UUID, slug string) (string, bool, error) {
 	var role string
-	err := r.db.QueryRow(ctx, `SELECT role FROM member_env_roles WHERE org_id=$1 AND user_id=$2 AND env_slug=$3`, orgID, userID, slug).Scan(&role)
+	err := r.db.QueryRow(ctx, `SELECT role FROM member_env_roles WHERE org_id=$1 AND user_id=$2 AND env_slug_hash=$3`, orgID, userID, r.box.Hash("environments.slug", slug)).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -177,6 +195,7 @@ func (r *Repo) Envs(ctx context.Context, projectID uuid.UUID) ([]Env, error) {
 		if err := rows.Scan(&e.ID, &e.Name, &e.Slug); err != nil {
 			return nil, err
 		}
+		e.Name, e.Slug = r.box.OpenName("environments.name", e.Name), r.box.OpenName("environments.slug", e.Slug)
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -184,7 +203,7 @@ func (r *Repo) Envs(ctx context.Context, projectID uuid.UUID) ([]Env, error) {
 
 func (r *Repo) EnvID(ctx context.Context, projectID uuid.UUID, slug string) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := r.db.QueryRow(ctx, `SELECT id FROM environments WHERE project_id=$1 AND slug=$2`, projectID, slug).Scan(&id)
+	err := r.db.QueryRow(ctx, `SELECT id FROM environments WHERE project_id=$1 AND slug_hash=$2`, projectID, r.box.Hash("environments.slug", slug)).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, apperr.NotFound("environment not found")
 	}

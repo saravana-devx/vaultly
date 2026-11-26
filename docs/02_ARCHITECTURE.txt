@@ -34,28 +34,31 @@ THREE KINDS OF CALLER
   2. A user's PERSONAL TOKEN (script) Authorization: Bearer vpt_...
   3. A MACHINE (service token)        Authorization: Bearer vst_...   -> only /api/v1/*
 
-Middleware: userAuth accepts 1 and 2; tokenAuth accepts 3. They produce a
-`principal` stored in the Gin context; handlers read it with me(c).
+Middleware: UserAuth accepts 1 and 2; ServiceAuth accepts 3. They produce a
+principal.Actor stored in the Gin context; handlers read it with principal.From(c) and pass it to
+the service, which never sees gin.
 
 REQUEST LIFECYCLE (example: a user saves a secret)
 --------------------------------------------------
   PUT /api/projects/:pid/secrets
    1. nginx forwards to the API
    2. Gin middleware: Recovery, Logger, CORS, security headers
-   3. rateLimit("ip", 600/min)         - Redis Lua sliding window
-   4. userAuth: verify JWT (or look up personal token hash)
-   5. rateLimit("user", 600/min)
-   6. handler putSecret:
-        a. s.project(c, "viewer")       joins projects+memberships -> org role
+   3. Limit("ip", 600/min)             - decision from the rate-limiter service (Redis Lua sliding window)
+   4. UserAuth: verify JWT (or look up personal token hash)
+   5. Limit("user", 600/min)
+   6. secret.Handler.Put binds the body, then secret.Service.Put:
+        a. access.Project(viewer)       joins projects+memberships -> org role
         b. validate key / path / tags / expiry
-        c. s.needEnv(c, p, env, "developer")   per-environment role check
-        d. s.dek(): load the wrapped project key, unwrap it via OpenBao (cached ~60 s)
-        e. writeSecret(): in ONE transaction
+        c. access.NeedEnv(developer)    per-environment role check
+        d. keystore.ProjectKey(): load the wrapped project key, unwrap it via OpenBao (cached ~60 s)
+        e. repository.Upsert(): in ONE transaction
              SELECT ... FOR UPDATE  (lock the row)
-             encrypt value with the project key (AES-256-GCM)
-             INSERT or UPDATE secrets, INSERT secret_versions
-        f. s.record(): publish an audit event (see below)
-   7. JSON response (the value is NEVER returned on write)
+             INSERT or UPDATE secrets (value already encrypted with the project key, AES-256-GCM)
+             INSERT secret_versions
+        f. audit.Record(): publish an audit event (see below)
+   7. {"success":true,"message":"Secret saved","data":{...}} (the value is NEVER returned on write)
+
+  Step-by-step flowcharts of every flow: 16_HOW_IT_WORKS_FLOWCHARTS.txt
 
 AUDIT PIPELINE (Kafka)
 ----------------------

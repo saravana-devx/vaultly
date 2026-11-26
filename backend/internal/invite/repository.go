@@ -8,11 +8,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vaultly/internal/dberr"
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+// An invitation's per-environment roles are stored sealed.
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
+
+func (r *Repository) roles(raw string) map[string]string {
+	out := map[string]string{}
+	if err := r.box.OpenJSON("invites.env_roles", raw, &out); err != nil || out == nil {
+		return map[string]string{}
+	}
+	return out
+}
 
 func (r *Repository) IsMember(ctx context.Context, org uuid.UUID, emailHash []byte) (bool, error) {
 	var found bool
@@ -28,7 +41,7 @@ func (r *Repository) ReplacePending(ctx context.Context, n NewInvite) (uuid.UUID
 		}
 		return tx.QueryRow(ctx, `INSERT INTO invites (org_id,email_enc,email_hash,role,env_roles,token_hash,invited_by,expires_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-			n.OrgID, n.EmailEnc, n.EmailHash, n.Role, n.EnvRoles, n.TokenHash, n.InvitedBy, n.ExpiresAt).Scan(&id)
+			n.OrgID, n.EmailEnc, n.EmailHash, n.Role, r.box.SealJSON("invites.env_roles", n.EnvRoles), n.TokenHash, n.InvitedBy, n.ExpiresAt).Scan(&id)
 	})
 	return id, err
 }
@@ -49,9 +62,11 @@ func (r *Repository) ListPending(ctx context.Context, org uuid.UUID) ([]Invite, 
 	var out []Invite
 	for rows.Next() {
 		i := Invite{OrgID: org}
-		if err := rows.Scan(&i.ID, &i.EmailEnc, &i.Role, &i.EnvRoles, &i.InvitedBy, &i.ExpiresAt, &i.CreatedAt); err != nil {
+		var roles string
+		if err := rows.Scan(&i.ID, &i.EmailEnc, &i.Role, &roles, &i.InvitedBy, &i.ExpiresAt, &i.CreatedAt); err != nil {
 			return nil, err
 		}
+		i.EnvRoles = r.roles(roles)
 		out = append(out, i)
 	}
 	return out, rows.Err()
@@ -69,12 +84,14 @@ func (r *Repository) Delete(ctx context.Context, id, org uuid.UUID) (string, err
 
 func (r *Repository) ByTokenHash(ctx context.Context, hash []byte) (*Invite, error) {
 	i := &Invite{}
+	var roles string
 	err := r.db.QueryRow(ctx, `SELECT i.id,i.org_id,o.name,i.email_enc,i.role,i.env_roles,i.invited_by,i.expires_at,i.accepted_at
 		FROM invites i JOIN orgs o ON o.id=i.org_id WHERE i.token_hash=$1`, hash).
-		Scan(&i.ID, &i.OrgID, &i.OrgName, &i.EmailEnc, &i.Role, &i.EnvRoles, &i.InvitedBy, &i.ExpiresAt, &i.Accepted)
+		Scan(&i.ID, &i.OrgID, &i.OrgName, &i.EmailEnc, &i.Role, &roles, &i.InvitedBy, &i.ExpiresAt, &i.Accepted)
 	if dberr.IsNoRows(err) {
 		return nil, ErrInviteNotFound
 	}
+	i.EnvRoles = r.roles(roles)
 	return i, err
 }
 
@@ -85,7 +102,7 @@ func (r *Repository) Accept(ctx context.Context, i *Invite, userID uuid.UUID) er
 			return err
 		}
 		for slug, role := range i.EnvRoles {
-			if _, err := tx.Exec(ctx, `INSERT INTO member_env_roles (org_id,user_id,env_slug,role) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, i.OrgID, userID, slug, role); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO member_env_roles (org_id,user_id,env_slug,env_slug_hash,role) VALUES ($1,$2,$3,$5,$4) ON CONFLICT DO NOTHING`, i.OrgID, userID, r.box.SealName("member_env_roles.slug", slug), role, r.box.Hash("environments.slug", slug)); err != nil {
 				return err
 			}
 		}

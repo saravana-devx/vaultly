@@ -35,7 +35,11 @@ func NewService(repo OrgRepository, access *access.Service, box *pii.Box) *Servi
 }
 
 func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Org, error) {
-	return s.repo.ListForUser(ctx, userID)
+	orgs, err := s.repo.ListForUser(ctx, userID)
+	for i := range orgs {
+		orgs[i].Name = s.pii.OpenName("orgs.name", orgs[i].Name)
+	}
+	return orgs, err
 }
 
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, req *CreateOrgRequest) (*Org, error) {
@@ -43,7 +47,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, req *CreateOrgRe
 	if name == "" {
 		return nil, ErrNameRequired
 	}
-	id, err := s.repo.Create(ctx, userID, name)
+	id, err := s.repo.Create(ctx, userID, s.pii.SealName("orgs.name", name))
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +86,10 @@ func (s *Service) Stats(ctx context.Context, userID, org uuid.UUID) (*Stats, err
 	for i := range out.Recent {
 		out.Recent[i].Actor = s.pii.OpenLabel(out.Recent[i].Actor)
 		out.Recent[i].Resource = s.pii.OpenLabel(out.Recent[i].Resource)
+		if out.Recent[i].Project != nil {
+			name := s.pii.OpenName("projects.name", *out.Recent[i].Project)
+			out.Recent[i].Project = &name
+		}
 	}
 	pending, err := s.repo.PendingInvites(ctx, org)
 	if err != nil {
@@ -98,6 +106,14 @@ func (s *Service) Stats(ctx context.Context, userID, org uuid.UUID) (*Stats, err
 		return nil, err
 	}
 	out.Attention = []Attention{}
+	for i := range tokens {
+		tokens[i].Project = s.pii.OpenName("projects.name", tokens[i].Project)
+		tokens[i].Name = s.pii.OpenName("service_tokens.name", tokens[i].Name)
+	}
+	for i := range secrets {
+		secrets[i].Project = s.pii.OpenName("projects.name", secrets[i].Project)
+		secrets[i].Name = s.pii.OpenName("secrets.key", secrets[i].Name)
+	}
 	for _, t := range tokens {
 		out.Attention = append(out.Attention, Attention{Kind: "token", Token: t.Name, ProjectID: t.ProjectID, Project: t.Project, Reason: tokenReason(t)})
 	}

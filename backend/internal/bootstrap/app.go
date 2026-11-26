@@ -53,21 +53,21 @@ type App struct {
 func New(d Deps) *App {
 	cfg, db := d.Config, d.DB
 
-	accessSvc := access.NewService(access.NewRepository(db))
+	accessSvc := access.NewService(access.NewRepository(db, d.PII), d.PII)
 	keys := keystore.NewService(d.Keys, keystore.NewRepository(db), cfg.KeyCacheTTL)
 	sessions := auth.NewManager(cfg.JWTSecret, d.Redis)
 
 	users := user.NewService(user.NewRepository(db), d.PII, sessions, d.Audit)
-	tokens := token.NewService(token.NewRepository(db), accessSvc, d.PII, d.Audit)
-	secrets := secret.NewService(secret.NewRepository(db), accessSvc, keys, d.PII, d.Audit)
+	tokens := token.NewService(token.NewRepository(db, d.PII), accessSvc, d.PII, d.Audit)
+	secrets := secret.NewService(secret.NewRepository(db, d.PII), accessSvc, keys, d.PII, d.Audit)
 
-	dyn := dynamic.NewService(dynamic.NewRepository(db), accessSvc, keys, d.PII, dynamic.Postgres{}, d.Audit)
+	dyn := dynamic.NewService(dynamic.NewRepository(db, d.PII), accessSvc, keys, d.PII, dynamic.Postgres{}, d.Audit)
 
-	hookRepo := webhook.NewRepository(db)
+	hookRepo := webhook.NewRepository(db, d.PII)
 	dispatcher := webhook.NewDispatcher(hookRepo, keys, cfg.WebhookAllowPrivate)
 	hooks := webhook.NewService(hookRepo, accessSvc, keys, dispatcher, d.Audit, cfg.WebhookAllowPrivate)
 
-	integrations := integration.NewService(integration.NewRepository(db), accessSvc, keys, secrets, integration.Registry(nil), d.Audit)
+	integrations := integration.NewService(integration.NewRepository(db, d.PII), accessSvc, keys, secrets, integration.Registry(nil), d.Audit)
 
 	d.Audit.Subscribe(dispatcher.Handle)
 	d.Audit.Subscribe(integrations.AutoSync)
@@ -76,16 +76,16 @@ func New(d Deps) *App {
 
 	h := routes.Handlers{
 		User:        user.NewHandler(users),
-		Org:         org.NewHandler(org.NewService(org.NewRepository(db), accessSvc, d.PII)),
-		Member:      member.NewHandler(member.NewService(member.NewRepository(db), accessSvc, users, d.Audit)),
-		Invite:      invite.NewHandler(invite.NewService(invite.NewRepository(db), accessSvc, users, d.PII, mailer, d.Audit, cfg.AppURL)),
-		Project:     project.NewHandler(project.NewService(project.NewRepository(db), accessSvc, keys, dyn, d.Audit)),
+		Org:         org.NewHandler(org.NewService(org.NewRepository(db, d.PII), accessSvc, d.PII)),
+		Member:      member.NewHandler(member.NewService(member.NewRepository(db, d.PII), accessSvc, users, d.Audit)),
+		Invite:      invite.NewHandler(invite.NewService(invite.NewRepository(db, d.PII), accessSvc, users, d.PII, mailer, d.Audit, cfg.AppURL)),
+		Project:     project.NewHandler(project.NewService(project.NewRepository(db, d.PII), accessSvc, keys, dyn, d.PII, d.Audit)),
 		Secret:      secret.NewHandler(secrets),
 		Token:       token.NewHandler(tokens),
 		Webhook:     webhook.NewHandler(hooks),
 		Integration: integration.NewHandler(integrations),
 		Dynamic:     dynamic.NewHandler(dyn),
-		Backup:      backup.NewHandler(backup.NewService(backup.NewRepository(db), accessSvc, keys, d.PII, d.Audit)),
+		Backup:      backup.NewHandler(backup.NewService(backup.NewRepository(db, d.PII), accessSvc, keys, d.PII, d.Audit)),
 		Audit:       audit.NewHandler(audit.NewReader(db, accessSvc, d.PII)),
 	}
 

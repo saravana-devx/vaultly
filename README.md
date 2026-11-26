@@ -7,9 +7,8 @@ Self-hosted secrets management: encrypted storage, environments and folders, ver
 ## Run
 
 ```bash
-cp .env.example .env            # then fill MASTER_KEY and JWT_SECRET
-#   MASTER_KEY=$(openssl rand -base64 32)   (optional once OpenBao is in use)   JWT_SECRET=$(openssl rand -hex 32)
-docker compose up -d --build
+cp .env.example .env            # then set JWT_SECRET=$(openssl rand -hex 32)
+make up                         # = docker compose up -d --build   (make down to stop, make help for more)
 ```
 
 | Service | URL |

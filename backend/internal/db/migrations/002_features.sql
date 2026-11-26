@@ -2,7 +2,7 @@ ALTER TABLE secrets ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
 ALTER TABLE secrets ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 ALTER TABLE secrets ADD COLUMN IF NOT EXISTS expiry_notified boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS secrets_expiry_idx ON secrets(expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS secrets_tags_idx ON secrets USING gin(tags);
+-- (tags used to have a GIN index; the column is text since 004 and is filtered in the application)
 
 ALTER TABLE service_tokens ADD COLUMN IF NOT EXISTS allowed_cidrs text[] NOT NULL DEFAULT '{}';
 

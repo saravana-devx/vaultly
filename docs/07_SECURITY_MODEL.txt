@@ -76,3 +76,16 @@ KNOWN LIMITATIONS (be upfront about these)
   - Dev compose has TLS off and publishes Postgres/Redis/Kafka ports; production needs
     TLS termination, private networking, and no published data-store ports.
   - Demo credentials in .env are for local use only.
+
+
+FIELD-LEVEL ENCRYPTION (a policy, not "everything")
+---------------------------------------------------
+Secret values are encrypted with per-project keys. On top of that, personal data and credential-adjacent text are
+encrypted with a separate pair of keys held in app_keys and wrapped by OpenBao: emails and names, workspace names,
+secret key names and comments, token prefixes, IP allowlists, webhook URLs, error messages that quote hosts, and the
+audit actor, resource and IP. Labels a team browses (project, environment and folder names, tags, token and
+integration names, roles, audit metadata) stay readable on purpose. A stolen database dump therefore shows how a
+team is organised and how active it is, but not people, secret values, what a secret is called, or where tokens
+connect from. The exact list and the reasoning are in file 13.
+Limits: the application server holds the keys while running, so a compromised API process can read everything it
+can serve; a database administrator can still see how many rows exist and when they changed.

@@ -8,17 +8,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vaultly/internal/dberr"
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+// Environment names and slugs are stored sealed; slug_hash keeps slugs unique within a project.
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
+
+func (r *Repository) slugHash(slug string) []byte { return r.box.Hash("environments.slug", slug) }
+func (r *Repository) openEnv(e Env) Env {
+	e.Name, e.Slug = r.box.OpenName("environments.name", e.Name), r.box.OpenName("environments.slug", e.Slug)
+	return e
+}
 
 func (r *Repository) ListByOrg(ctx context.Context, org uuid.UUID) ([]Summary, error) {
 	rows, err := r.db.Query(ctx, `SELECT p.id,p.name,p.created_at,
 		(SELECT count(*) FROM secrets WHERE project_id=p.id),
 		(SELECT max(created_at) FROM audit_logs WHERE project_id=p.id)
-		FROM projects p WHERE p.org_id=$1 ORDER BY p.name`, org)
+		FROM projects p WHERE p.org_id=$1 ORDER BY p.created_at`, org)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +59,7 @@ func (r *Repository) EnvsFor(ctx context.Context, projectIDs []uuid.UUID) (map[u
 		if err := rows.Scan(&pid, &e.ID, &e.Name, &e.Slug); err != nil {
 			return nil, err
 		}
-		out[pid] = append(out[pid], e)
+		out[pid] = append(out[pid], r.openEnv(e))
 	}
 	return out, rows.Err()
 }
@@ -61,7 +72,7 @@ func (r *Repository) Create(ctx context.Context, org uuid.UUID, name string, wra
 			return err
 		}
 		for i, e := range defaultEnvs {
-			if _, err := tx.Exec(ctx, `INSERT INTO environments (project_id,name,slug,position) VALUES ($1,$2,$3,$4)`, id, e.Name, e.Slug, i); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO environments (project_id,name,slug,slug_hash,position) VALUES ($1,$2,$3,$5,$4)`, id, r.box.SealName("environments.name", e.Name), r.box.SealName("environments.slug", e.Slug), i, r.slugHash(e.Slug)); err != nil {
 				return err
 			}
 		}
@@ -77,12 +88,13 @@ func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (r *Repository) CreateEnv(ctx context.Context, project uuid.UUID, name, slug string) (Env, error) {
 	e := Env{}
-	err := r.db.QueryRow(ctx, `INSERT INTO environments (project_id,name,slug,position)
-		VALUES ($1,$2,$3,(SELECT coalesce(max(position),0)+1 FROM environments WHERE project_id=$1)) RETURNING id,name,slug`,
-		project, name, slug).Scan(&e.ID, &e.Name, &e.Slug)
+	err := r.db.QueryRow(ctx, `INSERT INTO environments (project_id,name,slug,slug_hash,position)
+		VALUES ($1,$2,$3,$4,(SELECT coalesce(max(position),0)+1 FROM environments WHERE project_id=$1)) RETURNING id`,
+		project, r.box.SealName("environments.name", name), r.box.SealName("environments.slug", slug), r.slugHash(slug)).Scan(&e.ID)
 	if dberr.IsUnique(err) {
 		return Env{}, ErrEnvExists
 	}
+	e.Name, e.Slug = name, slug
 	return e, err
 }
 
@@ -92,5 +104,5 @@ func (r *Repository) DeleteEnv(ctx context.Context, project, env uuid.UUID) (str
 	if dberr.IsNoRows(err) {
 		return "", ErrEnvNotFound
 	}
-	return slug, err
+	return r.box.OpenName("environments.slug", slug), err
 }

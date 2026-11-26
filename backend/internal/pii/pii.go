@@ -13,6 +13,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -77,6 +78,94 @@ func (b *Box) OpenLabel(s string) string {
 		return p
 	}
 	return "[unreadable]"
+}
+
+// sealedFields is the policy: the columns stored encrypted. Everything else is stored as readable text.
+//
+// Encrypted: personal data about people (workspace names, which default to a person's name), and
+// anything credential-adjacent or revealing about a customer's systems: what a secret is called and
+// why it exists, token prefixes, IP allowlists, webhook URLs (some contain tokens) and the error
+// messages that quote them. Emails, names and audit actors/IPs are sealed through Seal/Label.
+//
+// Readable: labels a team browses and the database orders by (project, environment and folder names,
+// tags, token and integration names, role lists, audit metadata). Moving a field between the two is a
+// one-line change here; the startup conversion (Backfill) re-seals or un-seals existing rows.
+var sealedFields = map[string]bool{
+	"orgs.name":                   true,
+	"secrets.key":                 true,
+	"secrets.comment":             true,
+	"service_tokens.prefix":       true,
+	"service_tokens.cidrs":        true,
+	"personal_tokens.prefix":      true,
+	"webhooks.url":                true,
+	"webhook_deliveries.error":    true,
+	"integrations.last_error":     true,
+	"dynamic_leases.revoke_error": true,
+}
+
+// Encrypted reports whether the policy seals this field.
+func Encrypted(field string) bool { return sealedFields[field] }
+
+// SealName stores s encrypted if the policy says so, and as-is otherwise. It is idempotent, and the
+// field name ("orgs.name") is bound into the ciphertext.
+func (b *Box) SealName(field, s string) string {
+	if s == "" || Sealed(s) || !sealedFields[field] {
+		return s
+	}
+	return b.Seal(field, s)
+}
+
+// OpenName reverses SealName. Plaintext (legacy) values pass through; an unreadable value is
+// shown as a placeholder instead of failing the whole page.
+func (b *Box) OpenName(field, s string) string {
+	if !Sealed(s) {
+		return s
+	}
+	if p, err := b.Open(field, s); err == nil {
+		return p
+	}
+	return "[unreadable]"
+}
+
+// Hash is a keyed, case-sensitive lookup value for equality checks on encrypted columns
+// (a secret's key + path, an environment's slug). Identical inputs give identical hashes, so it
+// reveals only "these two values are equal"; the field name keeps different columns apart.
+func (b *Box) Hash(field, s string) []byte {
+	m := hmac.New(sha256.New, b.idx)
+	m.Write([]byte(field + "\x00" + s))
+	return m.Sum(nil)
+}
+
+// SealJSON encrypts any value (lists, maps) as JSON. OpenJSON reverses it; legacy plaintext JSON passes through.
+func (b *Box) SealJSON(field string, v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("pii: marshal: %v", err))
+	}
+	return b.SealName(field, string(raw))
+}
+
+func (b *Box) OpenJSON(field, s string, out any) error {
+	if s == "" {
+		return nil
+	}
+	if Sealed(s) {
+		plain, err := b.Open(field, s)
+		if err != nil {
+			return err
+		}
+		s = plain
+	}
+	return json.Unmarshal([]byte(s), out)
+}
+
+// LabelAll is Label for columns where every value is sealed, not only those containing an address
+// (audit actors and resources). OpenLabel reads both.
+func (b *Box) LabelAll(s string) string {
+	if s == "" || Sealed(s) {
+		return s
+	}
+	return b.Seal("label", s)
 }
 
 // Load returns the Box for this deployment, creating its two keys on first start.
@@ -207,8 +296,20 @@ func (b *Box) Backfill(ctx context.Context, pool *pgxpool.Pool) error {
 			counts[c.table+"."+c.col] = n
 		}
 	}
+	for _, c := range []struct{ table, pk, col string }{{"audit_logs", "id", "actor_label"}, {"audit_logs", "id", "resource"}, {"audit_logs", "id", "ip"}} {
+		n, err := b.sealText(ctx, pool, c.table, c.pk, c.col, b.LabelAll)
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", c.table, c.col, err)
+		}
+		if n > 0 {
+			counts[c.table+"."+c.col+" (all)"] = n
+		}
+	}
+	if err := b.backfillFields(ctx, pool, counts); err != nil {
+		return err
+	}
 	if len(counts) > 0 {
-		log.Printf("pii: encrypted existing plaintext rows: %v", counts)
+		log.Printf("pii: converted existing rows: %v", counts)
 	}
 	return nil
 }
@@ -235,6 +336,35 @@ func (b *Box) sealColumn(ctx context.Context, pool *pgxpool.Pool, table, pk, col
 		}
 		for _, x := range batch {
 			if _, err := pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s=$2 WHERE %s::text=$1`, table, col, pk), x.id, b.Label(x.v)); err != nil {
+				return total, err
+			}
+			total++
+		}
+	}
+}
+
+// sealText seals every not-yet-sealed value of a column using seal. Identifiers are constants from Backfill.
+func (b *Box) sealText(ctx context.Context, pool *pgxpool.Pool, table, pk, col string, seal func(string) string) (int, error) {
+	total := 0
+	for {
+		rows, err := pool.Query(ctx, fmt.Sprintf(`SELECT %s::text, %s FROM %s WHERE %s <> '' AND %s NOT LIKE '%s%%' LIMIT 500`, pk, col, table, col, col, Prefix))
+		if err != nil {
+			return total, err
+		}
+		type r struct{ id, v string }
+		var batch []r
+		for rows.Next() {
+			var x r
+			if rows.Scan(&x.id, &x.v) == nil {
+				batch = append(batch, x)
+			}
+		}
+		rows.Close()
+		if len(batch) == 0 {
+			return total, nil
+		}
+		for _, x := range batch {
+			if _, err := pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s=$2 WHERE %s::text=$1`, table, col, pk), x.id, seal(x.v)); err != nil {
 				return total, err
 			}
 			total++

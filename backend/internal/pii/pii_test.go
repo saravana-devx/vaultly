@@ -71,3 +71,72 @@ func TestLabelSealsEmailsOnlyAndIsIdempotent(t *testing.T) {
 		t.Fatal("a value sealed under another key must degrade to a placeholder, not an error")
 	}
 }
+
+func TestNamesAreSealedIdempotentAndLegacyPlaintextPasses(t *testing.T) {
+	b := box()
+	s := b.SealName("orgs.name", "Priya Nair's workspace")
+	if !Sealed(s) || strings.Contains(s, "Priya") {
+		t.Fatalf("name must be opaque: %q", s)
+	}
+	if b.SealName("orgs.name", s) != s {
+		t.Fatal("sealing an already sealed value must not double-encrypt")
+	}
+	if got := b.OpenName("orgs.name", s); got != "Priya Nair's workspace" {
+		t.Fatalf("open: %q", got)
+	}
+	if got := b.OpenName("orgs.name", "legacy plaintext"); got != "legacy plaintext" {
+		t.Fatalf("legacy plaintext must pass through: %q", got)
+	}
+	if got := b.OpenName("secrets.key", s); got != "[unreadable]" {
+		t.Fatalf("a value bound to another field must not open: %q", got)
+	}
+	if b.SealName("orgs.name", "") != "" {
+		t.Fatal("empty stays empty")
+	}
+}
+
+func TestPolicyDecidesWhatIsSealed(t *testing.T) {
+	b := box()
+	for _, f := range []string{"orgs.name", "secrets.key", "secrets.comment", "webhooks.url", "service_tokens.cidrs"} {
+		if !Encrypted(f) || !Sealed(b.SealName(f, "x")) {
+			t.Errorf("%s must be sealed", f)
+		}
+	}
+	for _, f := range []string{"projects.name", "environments.slug", "secrets.path", "secrets.tags", "webhooks.name", "audit.metadata"} {
+		if Encrypted(f) || b.SealName(f, "x") != "x" {
+			t.Errorf("%s must stay readable", f)
+		}
+	}
+}
+
+func TestHashIsKeyedCaseSensitiveAndPerField(t *testing.T) {
+	b := box()
+	if !bytes.Equal(b.Hash("secrets.key", "DB_URL"), b.Hash("secrets.key", "DB_URL")) {
+		t.Fatal("same input must hash the same")
+	}
+	if bytes.Equal(b.Hash("secrets.key", "DB_URL"), b.Hash("secrets.key", "db_url")) {
+		t.Fatal("keys are case sensitive")
+	}
+	if bytes.Equal(b.Hash("secrets.key", "x"), b.Hash("environments.slug", "x")) {
+		t.Fatal("different fields must not share hashes")
+	}
+	if bytes.Equal(box().Hash("secrets.key", "x"), b.Hash("secrets.key", "x")) {
+		t.Fatal("hash must depend on the key")
+	}
+}
+
+func TestJSONRoundTripAndLegacyJSON(t *testing.T) {
+	b := box()
+	sealed := b.SealJSON("service_tokens.cidrs", []string{"10.0.0.0/8", "192.168.1.5/32"})
+	if !Sealed(sealed) || strings.Contains(sealed, "10.0.0.0") {
+		t.Fatalf("must be opaque: %q", sealed)
+	}
+	var got []string
+	if err := b.OpenJSON("service_tokens.cidrs", sealed, &got); err != nil || len(got) != 2 || got[0] != "10.0.0.0/8" {
+		t.Fatalf("round trip: %v %v", got, err)
+	}
+	var legacy []string
+	if err := b.OpenJSON("secrets.tags", `["old"]`, &legacy); err != nil || len(legacy) != 1 {
+		t.Fatalf("legacy plaintext JSON must read: %v %v", legacy, err)
+	}
+}

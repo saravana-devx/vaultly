@@ -48,12 +48,14 @@ func (s *Service) Create(ctx context.Context, a principal.Actor, org uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
+	name = s.pii.OpenName("orgs.name", name)
 	projects, err := s.repo.Export(ctx, org)
 	if err != nil {
 		return nil, err
 	}
 	total := 0
 	for i := range projects {
+		projects[i].Name = s.pii.OpenName("projects.name", projects[i].Name)
 		for j := range projects[i].Secrets {
 			sec := &projects[i].Secrets[j]
 			sec.UpdatedBy = s.pii.OpenLabel(sec.UpdatedBy)
@@ -110,7 +112,9 @@ func (s *Service) Restore(ctx context.Context, a principal.Actor, org uuid.UUID,
 				sec.Versions[k].Actor = s.pii.Label(sec.Versions[k].Actor)
 			}
 		}
-		n, err := s.repo.Restore(ctx, org, p)
+		restored := p
+		restored.Name = s.pii.SealName("projects.name", p.Name)
+		n, err := s.repo.Restore(ctx, org, restored)
 		if err != nil {
 			res.Skipped = append(res.Skipped, Skipped{p.Name, ReasonRollback})
 			continue

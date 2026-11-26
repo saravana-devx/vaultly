@@ -46,11 +46,21 @@ func (r *Reader) List(ctx context.Context, a principal.Actor, org uuid.UUID, q L
 	page := &Page{Events: []Entry{}}
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.ProjectID, &e.Project, &e.ActorType, &e.Actor, &e.Action, &e.Resource, &e.Metadata, &e.IP, &e.At); err != nil {
+		var md *string
+		if err := rows.Scan(&e.ID, &e.ProjectID, &e.Project, &e.ActorType, &e.Actor, &e.Action, &e.Resource, &md, &e.IP, &e.At); err != nil {
 			return nil, err
+		}
+		e.Metadata = map[string]any{}
+		if md != nil {
+			_ = r.sealer.OpenJSON(fMetadata, *md, &e.Metadata)
 		}
 		e.Actor = r.sealer.OpenLabel(e.Actor)
 		e.Resource = r.sealer.OpenLabel(e.Resource)
+		e.IP = r.sealer.OpenLabel(e.IP)
+		if e.Project != nil {
+			name := r.sealer.OpenName("projects.name", *e.Project)
+			e.Project = &name
+		}
 		page.Events = append(page.Events, e)
 	}
 	if err := rows.Err(); err != nil {

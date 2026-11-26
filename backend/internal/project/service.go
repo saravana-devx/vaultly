@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -9,6 +10,7 @@ import (
 	"vaultly/internal/access"
 	"vaultly/internal/audit"
 	"vaultly/internal/keystore"
+	"vaultly/internal/pii"
 	"vaultly/internal/principal"
 	"vaultly/internal/slug"
 )
@@ -33,11 +35,12 @@ type Service struct {
 	access *access.Service
 	keys   *keystore.Service
 	leases LeaseRevoker
+	pii    *pii.Box
 	audit  *audit.Service
 }
 
-func NewService(repo ProjectRepository, access *access.Service, keys *keystore.Service, leases LeaseRevoker, audit *audit.Service) *Service {
-	return &Service{repo: repo, access: access, keys: keys, leases: leases, audit: audit}
+func NewService(repo ProjectRepository, access *access.Service, keys *keystore.Service, leases LeaseRevoker, box *pii.Box, audit *audit.Service) *Service {
+	return &Service{repo: repo, access: access, keys: keys, leases: leases, pii: box, audit: audit}
 }
 
 func (s *Service) List(ctx context.Context, a principal.Actor, org uuid.UUID) ([]Summary, error) {
@@ -49,9 +52,11 @@ func (s *Service) List(ctx context.Context, a principal.Actor, org uuid.UUID) ([
 		return projects, err
 	}
 	ids := make([]uuid.UUID, len(projects))
-	for i, p := range projects {
-		ids[i] = p.ID
+	for i := range projects {
+		projects[i].Name = s.pii.OpenName("projects.name", projects[i].Name)
+		ids[i] = projects[i].ID
 	}
+	sort.Slice(projects, func(a, b int) bool { return strings.ToLower(projects[a].Name) < strings.ToLower(projects[b].Name) })
 	envs, err := s.repo.EnvsFor(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -76,7 +81,7 @@ func (s *Service) Create(ctx context.Context, a principal.Actor, org uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	id, err := s.repo.Create(ctx, org, name, wrapped)
+	id, err := s.repo.Create(ctx, org, s.pii.SealName("projects.name", name), wrapped)
 	if err != nil {
 		return nil, err
 	}

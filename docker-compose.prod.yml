@@ -27,13 +27,17 @@ services:
     depends_on: [backend, frontend]
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.web
     restart: unless-stopped
     logging: *logging
     depends_on: [backend]
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.server
     restart: unless-stopped
     logging: *logging
     environment:
@@ -116,19 +120,10 @@ services:
 
   ratelimiter:
     build:
-      context: ${RATELIMITER_SRC:-https://github.com/saravana-devx/Distributed-rate-limiter.git}
-      dockerfile_inline: |
-        FROM golang:1.26-alpine AS build
-        WORKDIR /src
-        COPY go.mod go.sum ./
-        RUN go mod download
-        COPY . .
-        RUN CGO_ENABLED=0 go build -o /out/ratelimiter ./cmd/server
-        FROM alpine:3.20
-        WORKDIR /app
-        RUN touch .env
-        COPY --from=build /out/ratelimiter /usr/local/bin/ratelimiter
-        CMD ["ratelimiter"]
+      context: ./deploy/ratelimiter
+      dockerfile: Dockerfile.server
+      additional_contexts:
+        src: ${RATELIMITER_SRC:-https://github.com/saravana-devx/Distributed-rate-limiter.git}
     restart: unless-stopped
     logging: *logging
     environment:

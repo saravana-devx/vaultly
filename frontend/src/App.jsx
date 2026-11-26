@@ -10,6 +10,7 @@ import Members from './pages/Members.jsx'
 import Audit from './pages/Audit.jsx'
 import Settings from './pages/Settings.jsx'
 import Invite from './pages/Invite.jsx'
+import Docs from './pages/Docs.jsx'
 import { ConfirmHost, Toaster } from './components/feedback.jsx'
 
 function Private({ children }) {
@@ -35,6 +36,7 @@ export default function App() {
       <Route path="/login" element={<Public><Login /></Public>} />
       <Route path="/register" element={<Public><Register /></Public>} />
       <Route path="/invite/:token" element={<Invite />} />
+      <Route path="/docs" element={<Docs />} />
       <Route path="/app" element={<Private><Shell /></Private>}>
         <Route index element={<Dashboard />} />
         <Route path="projects" element={<Projects />} />

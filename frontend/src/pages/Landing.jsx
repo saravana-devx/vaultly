@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Logo } from '../components/ui.jsx'
+import { Logo, ThemeToggle } from '../components/ui.jsx'
 
 function Preview() {
   const rows = [['DATABASE_URL', 'postgres://app:s3cr3t@10.0.4.12/app', true, 'v4', '2 hr ago'], ['STRIPE_SECRET_KEY', '', false, 'v2', '3 d ago'], ['SENDGRID_API_KEY', '', false, 'v1', '3 d ago'], ['JWT_SIGNING_KEY', '', false, 'v7', '12 d ago'], ['REDIS_URL', '', false, 'v1', '12 d ago']]
@@ -36,8 +36,9 @@ export default function Landing({ signedIn }) {
       <header className={`lp-nav ${scrolled ? 'scrolled' : ''}`}>
         <div className="lp-wrap">
           <Link to="/"><Logo /></Link>
-          <nav className="lp-links"><a href="#product">Product</a><a href="#security">Security</a><a href="#cli">CLI &amp; API</a><a href="#faq">FAQ</a></nav>
+          <nav className="lp-links"><a href="#product">Product</a><a href="#security">Security</a><a href="#cli">CLI &amp; API</a><a href="#hosting">Cloud &amp; self-host</a><a href="#faq">FAQ</a><Link to="/docs">Docs</Link></nav>
           <div className="right">
+            <ThemeToggle />
             {signedIn ? <Link className="btn primary sm" to="/app">Open dashboard</Link> : <>
               <Link className="btn ghost sm" to="/login">Sign in</Link><Link className="btn primary sm" to="/register">Get started</Link></>}
           </div>
@@ -46,15 +47,15 @@ export default function Landing({ signedIn }) {
 
       <section className="lp-hero">
         <div className="lp-wrap">
-          <div className="pill"><b>New</b> Path-scoped service tokens &amp; one-click rotation</div>
+          <div className="pill"><b>Free</b> Hosted workspace, or run it yourself</div>
           <h1>Stop leaking secrets. <span className="grad">Start shipping securely.</span></h1>
-          <p className="lede">Vaultly is the self-hosted home for your API keys, database passwords and environment variables. Encrypted, versioned, and audited across every environment.</p>
+          <p className="lede">Vaultly is the home for your API keys, database passwords and environment variables. Encrypted, versioned, and audited across every environment. Use the hosted workspace, or run the same code on your own server.</p>
           <div className="lp-cta">
             <Link className="btn primary lg" to={start}>{signedIn ? 'Open dashboard' : 'Create free workspace'}</Link>
-            <a className="btn lg" href="#product">See how it works</a>
+            <a className="btn lg" href="#hosting">Self-host it</a>
           </div>
-          <div className="term">
-            <div className="term-bar"><i /><i /><i /><span>~/projects/api</span></div>
+          <p className="demo-note">The hosted workspace is a free demo. Please don’t store real production secrets in it yet.</p>
+          <div className="run" aria-label="Example commands">
 <pre><span className="t-dim">$ </span><span className="t-g">vaultly</span>{` pull --format dotenv
 `}<span className="t-dim">{`# fetched 4 secrets from production /`}</span>{`
 DATABASE_URL=`}<span className="t-y">postgres://app:••••••••@db:5432/app</span>{`
@@ -144,13 +145,38 @@ JWT_SECRET=`}<span className="t-y">•••••••••••••••
         </div>
       </div>
 
+      <section className="host" id="hosting">
+        <div className="lp-wrap">
+          <span className="tag">CLOUD OR SELF-HOSTED</span>
+          <h2>Same product. You choose where it runs.</h2>
+          <p className="sub">Start in a minute on the hosted workspace, or keep everything on your own infrastructure. The code is the same, so you can move between them.</p>
+          <div className="host-grid">
+            <div className="host-col">
+              <h3>Hosted workspace</h3>
+              <p>Sign up and you get your own workspace with projects, environments, tokens and an audit log. Nothing to install.</p>
+              <ul><li>Free demo, no card needed</li><li>Your own isolated workspace and encryption keys</li><li>Same CLI and API as self-hosted</li></ul>
+              <Link className="btn primary" to={start}>{signedIn ? 'Open dashboard' : 'Create free workspace'}</Link>
+            </div>
+            <div className="host-col">
+              <h3>Self-hosted</h3>
+              <p>Run the whole stack with Docker. Your data, your keys and your network, with HTTPS from Caddy in production.</p>
+              <pre>{`git clone https://github.com/saravana-devx/vaultly.git
+cd vaultly
+make up`}</pre>
+              <ul><li>PostgreSQL, Redis, Kafka and OpenBao included</li><li>Encrypted, passphrase-protected backups</li></ul>
+              <a className="btn" href="https://github.com/saravana-devx/vaultly" target="_blank" rel="noreferrer">View on GitHub</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="sec" id="security">
         <div className="lp-wrap">
           <h2>If someone gets your database, they get ciphertext.</h2>
           <p className="sub">Secrets use envelope encryption. The key that unlocks everything never sits next to the data it protects.</p>
           <div className="sec-grid">
             <div className="keys">
-              <div className="k"><span className="n">01</span><b>Master key</b><span>Supplied through the environment and never written to the database. This is the single place to plug in a KMS.</span></div>
+              <div className="k"><span className="n">01</span><b>Root key</b><span>Held by OpenBao, a separate key service, and never written to the database. It only wraps and unwraps project keys.</span></div>
               <div className="k"><span className="n">02</span><b>Project key</b><span>A random 256-bit key per project, stored only in wrapped (encrypted) form.</span></div>
               <div className="k"><span className="n">03</span><b>Secret value</b><span>Sealed with AES-256-GCM and bound to its project, so ciphertext can’t be moved between projects.</span></div>
             </div>
@@ -159,6 +185,7 @@ JWT_SECRET=`}<span className="t-y">•••••••••••••••
               <div><b>Sessions</b><span>15-minute access token, rotating refresh token in an httpOnly cookie</span></div>
               <div><b>Service tokens</b><span>SHA-256 hashed at rest, shown once</span></div>
               <div><b>Sign-in</b><span>Rate limited per IP</span></div>
+              <div><b>Personal data</b><span>Emails and names are encrypted too</span></div>
               <div><b>Reads</b><span>Every reveal and export is audited</span></div>
             </div>
           </div>
@@ -169,7 +196,9 @@ JWT_SECRET=`}<span className="t-y">•••••••••••••••
         <section className="faq" id="faq">
           <h2>Questions, answered.</h2>
           <div>
-            <details><summary>Where does the master key live?</summary><p>Today it is read from the MASTER_KEY environment variable at startup. The keyring is a small, isolated piece of code, which is where you would swap in AWS KMS or similar.</p></details>
+            <details><summary>Where does the root key live?</summary><p>In OpenBao, a separate key service. Vaultly asks it to wrap and unwrap each project’s key, and the root key never leaves it. For simple setups a local key from the environment is also supported.</p></details>
+            <details><summary>Can I use it for real production secrets?</summary><p>The hosted workspace is a free demo, so please don’t put real production secrets in it yet. If you need that, self-host it: you keep the data, the keys and the server.</p></details>
+            <details><summary>How do I self-host it?</summary><p>Clone the repository and run <span className="mono">make up</span> (or <span className="mono">docker compose up -d</span>). The runbook in the repository covers a single-server setup with automatic HTTPS and backups.</p></details>
             <details><summary>Why is Kafka involved?</summary><p>Audit events are published to a topic and persisted by a consumer group, so they stay ordered per workspace and writing them never sits in the request path. If the broker is down, events are written straight to Postgres.</p></details>
             <details><summary>Can I bring my existing .env files?</summary><p>Yes. Paste the contents into the import dialog and pick an environment and path. Quoted values, comments and export prefixes are handled.</p></details>
             <details><summary>Does it support SSO?</summary><p>Not yet. Sign-in is email and password, with role-based access inside each workspace.</p></details>
@@ -179,19 +208,45 @@ JWT_SECRET=`}<span className="t-y">•••••••••••••••
 
       <section className="lp-final">
         <div className="lp-wrap">
-          <h2>Get the secrets out of Slack.</h2>
-          <Link className="btn primary lg" to={start}>{signedIn ? 'Open dashboard' : 'Create a workspace'}</Link>
+          <div>
+            <h2>Get the secrets out of Slack.</h2>
+            <p>Start in a minute on the hosted workspace, or run the same product on your own server with one command.</p>
+          </div>
+          <div className="lp-final-act">
+            <Link className="btn primary lg" to={start}>{signedIn ? 'Open dashboard' : 'Create free workspace'}</Link>
+            <a className="btn lg" href="#hosting">Self-host it</a>
+          </div>
         </div>
       </section>
 
       <footer className="lp-foot">
-        <div className="lp-wrap">
-          <div><Logo /><p style={{ marginTop: 12, maxWidth: '30ch' }}>Secrets management for teams that ship.</p></div>
-          <div><h4>Product</h4><a href="#product">Overview</a><a href="#security">Security</a><a href="#cli">CLI &amp; API</a></div>
-          <div><h4>Account</h4><Link to="/login">Sign in</Link><Link to="/register">Create workspace</Link></div>
-          <div><h4>Resources</h4><a href="#faq">FAQ</a></div>
-          <div className="legal">© {new Date().getFullYear()} Vaultly</div>
+        <div className="lp-wrap lp-foot-top">
+          <div className="lp-foot-brand">
+            <Logo />
+            <p>Secrets management for teams that ship. Hosted or self-hosted.</p>
+            <span className="lp-foot-status"><i /> Encrypted at rest · every access audited</span>
+          </div>
+          <nav aria-label="Product">
+            <h4>Product</h4>
+            <a href="#product">How it works</a><a href="#security">Security</a><a href="#cli">CLI &amp; API</a><a href="#hosting">Cloud &amp; self-host</a>
+          </nav>
+          <nav aria-label="Developers">
+            <h4>Developers</h4>
+            <a href="https://github.com/saravana-devx/vaultly" target="_blank" rel="noreferrer">GitHub</a>
+            <Link to="/docs">Documentation</Link>
+            <a href="https://github.com/saravana-devx/vaultly/blob/main/docs/06_API_REFERENCE.txt" target="_blank" rel="noreferrer">API reference</a>
+            <a href="#faq">FAQ</a>
+          </nav>
+          <nav aria-label="Account">
+            <h4>Account</h4>
+            <Link to="/login">Sign in</Link><Link to="/register">Create workspace</Link>
+          </nav>
         </div>
+        <div className="lp-wrap lp-foot-bottom">
+          <span>© {new Date().getFullYear()} Vaultly</span>
+          <span>Built with Go · React · PostgreSQL · Kafka · OpenBao</span>
+        </div>
+        <div className="lp-mark" aria-hidden="true"><span>Vaultly</span></div>
       </footer>
     </div>
   )

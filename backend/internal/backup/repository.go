@@ -8,11 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vaultly/internal/dberr"
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
 
 func (r *Repository) OrgName(ctx context.Context, org uuid.UUID) (string, error) {
 	var name string
@@ -61,6 +65,7 @@ func (r *Repository) fill(ctx context.Context, p *exportProject) error {
 			erows.Close()
 			return err
 		}
+		e.Name, e.Slug = r.box.OpenName("environments.name", e.Name), r.box.OpenName("environments.slug", e.Slug)
 		p.Environments = append(p.Environments, e)
 	}
 	erows.Close()
@@ -73,9 +78,15 @@ func (r *Repository) fill(ctx context.Context, p *exportProject) error {
 	index := map[uuid.UUID]int{}
 	for srows.Next() {
 		var sec exportSecret
-		if err := srows.Scan(&sec.id, &sec.Env, &sec.Path, &sec.Key, &sec.EncryptedValue, &sec.Version, &sec.Comment, &sec.Tags, &sec.ExpiresAt, &sec.UpdatedBy, &sec.UpdatedAt); err != nil {
+		if err := srows.Scan(&sec.id, &sec.Env, &sec.Path, &sec.Key, &sec.EncryptedValue, &sec.Version, &sec.Comment, &sec.tagsRaw, &sec.ExpiresAt, &sec.UpdatedBy, &sec.UpdatedAt); err != nil {
 			srows.Close()
 			return err
+		}
+		sec.Env = r.box.OpenName("environments.slug", sec.Env)
+		sec.Path, sec.Key, sec.Comment = r.box.OpenName("secrets.path", sec.Path), r.box.OpenName("secrets.key", sec.Key), r.box.OpenName("secrets.comment", sec.Comment)
+		var tags []string
+		if r.box.OpenJSON("secrets.tags", sec.tagsRaw, &tags) == nil {
+			sec.Tags = tags
 		}
 		index[sec.id] = len(p.Secrets)
 		p.Secrets = append(p.Secrets, sec)
@@ -118,7 +129,7 @@ func (r *Repository) Restore(ctx context.Context, org uuid.UUID, p exportProject
 		envIDs := map[string]uuid.UUID{}
 		for _, e := range p.Environments {
 			var id uuid.UUID
-			if err := tx.QueryRow(ctx, `INSERT INTO environments (project_id,name,slug,position) VALUES ($1,$2,$3,$4) RETURNING id`, p.ID, e.Name, e.Slug, e.Position).Scan(&id); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO environments (project_id,name,slug,slug_hash,position) VALUES ($1,$2,$3,$5,$4) RETURNING id`, p.ID, r.box.SealName("environments.name", e.Name), r.box.SealName("environments.slug", e.Slug), e.Position, r.box.Hash("environments.slug", e.Slug)).Scan(&id); err != nil {
 				return err
 			}
 			envIDs[e.Slug] = id
@@ -132,9 +143,12 @@ func (r *Repository) Restore(ctx context.Context, org uuid.UUID, p exportProject
 				sec.Tags = []string{}
 			}
 			var sid uuid.UUID
-			if err := tx.QueryRow(ctx, `INSERT INTO secrets (project_id,env_id,path,key,encrypted_value,version,comment,tags,expires_at,updated_by,updated_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-				p.ID, eid, sec.Path, sec.Key, sec.EncryptedValue, sec.Version, sec.Comment, sec.Tags, sec.ExpiresAt, sec.UpdatedBy, sec.UpdatedAt).Scan(&sid); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO secrets (project_id,env_id,path,key,path_hash,lookup_hash,encrypted_value,version,comment,tags,expires_at,updated_by,updated_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+				p.ID, eid, r.box.SealName("secrets.path", sec.Path), r.box.SealName("secrets.key", sec.Key),
+				r.box.Hash("secrets.path", sec.Path), r.box.Hash("secrets.lookup", sec.Path+"\x00"+sec.Key),
+				sec.EncryptedValue, sec.Version, r.box.SealName("secrets.comment", sec.Comment), r.box.SealJSON("secrets.tags", sec.Tags),
+				sec.ExpiresAt, sec.UpdatedBy, sec.UpdatedAt).Scan(&sid); err != nil {
 				return err
 			}
 			for _, v := range sec.Versions {

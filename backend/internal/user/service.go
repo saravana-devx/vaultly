@@ -53,7 +53,7 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest, ip string)
 	}
 	id, orgID, err := s.repo.Create(ctx, NewUser{
 		EmailEnc: s.pii.Seal("users.email", email), EmailHash: s.pii.Index(email),
-		NameEnc: s.pii.Seal("users.name", name), PasswordHash: hash, OrgName: orgName,
+		NameEnc: s.pii.Seal("users.name", name), PasswordHash: hash, OrgName: s.pii.SealName("orgs.name", orgName),
 	})
 	if err != nil {
 		return nil, err

@@ -7,11 +7,34 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vaultly/internal/dberr"
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+// Token names, prefixes, paths and IP allowlists are stored sealed.
+const (
+	fSvcName   = "service_tokens.name"
+	fSvcPrefix = "service_tokens.prefix"
+	fSvcPath   = "service_tokens.path"
+	fSvcCIDRs  = "service_tokens.cidrs"
+	fPatName   = "personal_tokens.name"
+	fPatPrefix = "personal_tokens.prefix"
+	fSlug      = "environments.slug"
+)
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
+
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
+
+func (r *Repository) cidrs(raw string) []string {
+	out := []string{}
+	if err := r.box.OpenJSON(fSvcCIDRs, raw, &out); err != nil || out == nil {
+		return []string{}
+	}
+	return out
+}
 
 func (r *Repository) ListService(ctx context.Context, projectID uuid.UUID) ([]ServiceView, error) {
 	rows, err := r.db.Query(ctx, `SELECT t.id,t.name,t.token_prefix,e.slug,t.path_prefix,t.can_write,t.allowed_cidrs,t.expires_at,t.last_used_at,t.created_by,t.created_at
@@ -23,9 +46,12 @@ func (r *Repository) ListService(ctx context.Context, projectID uuid.UUID) ([]Se
 	out := []ServiceView{}
 	for rows.Next() {
 		var v ServiceView
-		if err := rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.Env, &v.Path, &v.CanWrite, &v.AllowedCIDRs, &v.ExpiresAt, &v.LastUsedAt, &v.CreatedBy, &v.CreatedAt); err != nil {
+		var cidrs string
+		if err := rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.Env, &v.Path, &v.CanWrite, &cidrs, &v.ExpiresAt, &v.LastUsedAt, &v.CreatedBy, &v.CreatedAt); err != nil {
 			return nil, err
 		}
+		v.Name, v.Prefix = r.box.OpenName(fSvcName, v.Name), r.box.OpenName(fSvcPrefix, v.Prefix)
+		v.Env, v.Path, v.AllowedCIDRs = r.box.OpenName(fSlug, v.Env), r.box.OpenName(fSvcPath, v.Path), r.cidrs(cidrs)
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -33,9 +59,14 @@ func (r *Repository) ListService(ctx context.Context, projectID uuid.UUID) ([]Se
 
 func (r *Repository) CreateService(ctx context.Context, n NewServiceToken) (uuid.UUID, error) {
 	var id uuid.UUID
+	cidrs := n.CIDRs
+	if cidrs == nil {
+		cidrs = []string{}
+	}
 	err := r.db.QueryRow(ctx, `INSERT INTO service_tokens (project_id,env_id,name,token_prefix,token_hash,path_prefix,can_write,allowed_cidrs,expires_at,created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-		n.ProjectID, n.EnvID, n.Name, n.Prefix, n.Hash, n.Path, n.CanWrite, n.CIDRs, n.ExpiresAt, n.CreatedBy).Scan(&id)
+		n.ProjectID, n.EnvID, r.box.SealName(fSvcName, n.Name), r.box.SealName(fSvcPrefix, n.Prefix), n.Hash, r.box.SealName(fSvcPath, n.Path),
+		n.CanWrite, r.box.SealJSON(fSvcCIDRs, cidrs), n.ExpiresAt, n.CreatedBy).Scan(&id)
 	return id, err
 }
 
@@ -45,20 +76,26 @@ func (r *Repository) DeleteService(ctx context.Context, id, projectID uuid.UUID)
 	if dberr.IsNoRows(err) {
 		return "", ErrTokenNotFound
 	}
-	return name, err
+	return r.box.OpenName(fSvcName, name), err
 }
 
 func (r *Repository) ServiceByHash(ctx context.Context, hash []byte) (*ServiceRecord, error) {
 	t := &ServiceRecord{}
+	var cidrs string
 	err := r.db.QueryRow(ctx, `
 		SELECT t.id, t.project_id, p.org_id, t.env_id, e.slug, t.name, t.path_prefix, t.can_write, t.allowed_cidrs, t.expires_at
 		FROM service_tokens t JOIN projects p ON p.id = t.project_id JOIN environments e ON e.id = t.env_id
 		WHERE t.token_hash = $1`, hash).
-		Scan(&t.ID, &t.ProjectID, &t.OrgID, &t.EnvID, &t.EnvSlug, &t.Name, &t.PathPrefix, &t.CanWrite, &t.CIDRs, &t.ExpiresAt)
+		Scan(&t.ID, &t.ProjectID, &t.OrgID, &t.EnvID, &t.EnvSlug, &t.Name, &t.PathPrefix, &t.CanWrite, &cidrs, &t.ExpiresAt)
 	if dberr.IsNoRows(err) {
 		return nil, ErrInvalidToken
 	}
-	return t, err
+	if err != nil {
+		return nil, err
+	}
+	t.EnvSlug, t.Name = r.box.OpenName(fSlug, t.EnvSlug), r.box.OpenName(fSvcName, t.Name)
+	t.PathPrefix, t.CIDRs = r.box.OpenName(fSvcPath, t.PathPrefix), r.cidrs(cidrs)
+	return t, nil
 }
 
 func (r *Repository) TouchService(ctx context.Context, id uuid.UUID) {
@@ -77,6 +114,7 @@ func (r *Repository) ListPersonal(ctx context.Context, userID uuid.UUID) ([]Pers
 		if err := rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.ExpiresAt, &v.LastUsedAt, &v.CreatedAt); err != nil {
 			return nil, err
 		}
+		v.Name, v.Prefix = r.box.OpenName(fPatName, v.Name), r.box.OpenName(fPatPrefix, v.Prefix)
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -85,7 +123,7 @@ func (r *Repository) ListPersonal(ctx context.Context, userID uuid.UUID) ([]Pers
 func (r *Repository) CreatePersonal(ctx context.Context, n NewPersonalToken) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := r.db.QueryRow(ctx, `INSERT INTO personal_tokens (user_id,name,token_prefix,token_hash,expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		n.UserID, n.Name, n.Prefix, n.Hash, n.ExpiresAt).Scan(&id)
+		n.UserID, r.box.SealName(fPatName, n.Name), r.box.SealName(fPatPrefix, n.Prefix), n.Hash, n.ExpiresAt).Scan(&id)
 	return id, err
 }
 

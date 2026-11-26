@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Avatar, Icon } from './ui.jsx'
+import { Avatar, Icon, useScrollLock } from './ui.jsx'
 
 export default function CommandPalette({ open, onClose, projects, admin }) {
   const nav = useNavigate()
+  useScrollLock(open)
   const [q, setQ] = useState('')
   const [idx, setIdx] = useState(0)
   const input = useRef()

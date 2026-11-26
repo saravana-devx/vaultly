@@ -24,7 +24,7 @@ import (
 type SecretRepository interface {
 	Get(ctx context.Context, projectID, id uuid.UUID) (*Stored, error)
 	List(ctx context.Context, envID uuid.UUID, path, tag string) ([]Secret, error)
-	Search(ctx context.Context, projectID uuid.UUID, envIDs []uuid.UUID, like string) ([]Secret, error)
+	Search(ctx context.Context, projectID uuid.UUID, envIDs []uuid.UUID, needle string) ([]Secret, error)
 	Upsert(ctx context.Context, w Write) (Secret, bool, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	Versions(ctx context.Context, id uuid.UUID) ([]VersionInfo, error)
@@ -166,8 +166,7 @@ func (s *Service) Search(ctx context.Context, a principal.Actor, projectID uuid.
 			ids = append(ids, id)
 		}
 	}
-	like := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query) + "%"
-	rows, err := s.repo.Search(ctx, projectID, ids, like)
+	rows, err := s.repo.Search(ctx, projectID, ids, strings.ToLower(query))
 	if err != nil {
 		return nil, err
 	}

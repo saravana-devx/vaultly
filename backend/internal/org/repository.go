@@ -2,15 +2,21 @@ package org
 
 import (
 	"context"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
 
 func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Org, error) {
 	rows, err := r.db.Query(ctx, `SELECT o.id, o.name, m.role FROM orgs o JOIN memberships m ON m.org_id=o.id WHERE m.user_id=$1 ORDER BY o.created_at`, userID)
@@ -92,8 +98,13 @@ func (r *Repository) Recent(ctx context.Context, org uuid.UUID, limit int) ([]Re
 	out := []RecentEvent{}
 	for rows.Next() {
 		var e RecentEvent
-		if err := rows.Scan(&e.Actor, &e.Action, &e.Resource, &e.Project, &e.Metadata, &e.At); err != nil {
+		var md *string
+		if err := rows.Scan(&e.Actor, &e.Action, &e.Resource, &e.Project, &md, &e.At); err != nil {
 			return nil, err
+		}
+		e.Metadata = map[string]any{}
+		if md != nil {
+			_ = r.box.OpenJSON("audit.metadata", *md, &e.Metadata)
 		}
 		out = append(out, e)
 	}
@@ -144,18 +155,23 @@ func (r *Repository) SecretExpiries(ctx context.Context, org uuid.UUID) ([]Expir
 }
 
 func (r *Repository) EnvSlugs(ctx context.Context, org uuid.UUID) ([]string, error) {
-	rows, err := r.db.Query(ctx, `SELECT DISTINCT e.slug FROM environments e JOIN projects p ON p.id=e.project_id WHERE p.org_id=$1 ORDER BY e.slug`, org)
+	rows, err := r.db.Query(ctx, `SELECT e.slug FROM environments e JOIN projects p ON p.id=e.project_id WHERE p.org_id=$1`, org)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	seen := map[string]bool{}
 	out := []string{}
 	for rows.Next() {
 		var s string
 		if err := rows.Scan(&s); err != nil {
 			return nil, err
 		}
-		out = append(out, s)
+		if s = r.box.OpenName("environments.slug", s); !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
 	}
+	sort.Strings(out)
 	return out, rows.Err()
 }

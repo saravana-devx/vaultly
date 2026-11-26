@@ -8,11 +8,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vaultly/internal/dberr"
+	"vaultly/internal/pii"
 )
 
-type Repository struct{ db *pgxpool.Pool }
+// Names are stored sealed (name_hash keeps them unique per environment); lease usernames and errors too.
+const (
+	fName     = "dynamic_configs.name"
+	fUsername = "dynamic_leases.username"
+	fRevErr   = "dynamic_leases.revoke_error"
+	fSlug     = "environments.slug"
+)
 
-func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
+type Repository struct {
+	db  *pgxpool.Pool
+	box *pii.Box
+}
+
+func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
+
+func (r *Repository) nameHash(name string) []byte { return r.box.Hash(fName, name) }
 
 func (r *Repository) List(ctx context.Context, projectID uuid.UUID) ([]ConfigRow, error) {
 	rows, err := r.db.Query(ctx, `SELECT d.id,d.name,d.provider,e.slug,d.config_enc,d.default_ttl_s,d.max_ttl_s,
@@ -28,6 +42,7 @@ func (r *Repository) List(ctx context.Context, projectID uuid.UUID) ([]ConfigRow
 		if err := rows.Scan(&c.ID, &c.Name, &c.Provider, &c.Env, &c.ConfigEnc, &c.DefaultTTL, &c.MaxTTL, &c.Active); err != nil {
 			return nil, err
 		}
+		c.Name, c.Env = r.box.OpenName(fName, c.Name), r.box.OpenName(fSlug, c.Env)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -35,8 +50,8 @@ func (r *Repository) List(ctx context.Context, projectID uuid.UUID) ([]ConfigRow
 
 func (r *Repository) Create(ctx context.Context, n NewConfig) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := r.db.QueryRow(ctx, `INSERT INTO dynamic_configs (project_id,env_id,name,config_enc,default_ttl_s,max_ttl_s) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-		n.ProjectID, n.EnvID, n.Name, n.ConfigEnc, n.DefaultTTL, n.MaxTTL).Scan(&id)
+	err := r.db.QueryRow(ctx, `INSERT INTO dynamic_configs (project_id,env_id,name,name_hash,config_enc,default_ttl_s,max_ttl_s) VALUES ($1,$2,$3,$7,$4,$5,$6) RETURNING id`,
+		n.ProjectID, n.EnvID, r.box.SealName(fName, n.Name), n.ConfigEnc, n.DefaultTTL, n.MaxTTL, r.nameHash(n.Name)).Scan(&id)
 	if dberr.IsUnique(err) {
 		return uuid.Nil, ErrNameTaken
 	}
@@ -49,7 +64,7 @@ func (r *Repository) Name(ctx context.Context, id, projectID uuid.UUID) (string,
 	if dberr.IsNoRows(err) {
 		return "", ErrNotFound
 	}
-	return name, err
+	return r.box.OpenName(fName, name), err
 }
 
 func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
@@ -65,12 +80,16 @@ func (r *Repository) ConfigForLease(ctx context.Context, id, projectID uuid.UUID
 	if dberr.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
-	return c, err
+	if err != nil {
+		return nil, err
+	}
+	c.Name, c.Env = r.box.OpenName(fName, c.Name), r.box.OpenName(fSlug, c.Env)
+	return c, nil
 }
 
 func (r *Repository) IDByName(ctx context.Context, projectID, envID uuid.UUID, name string) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := r.db.QueryRow(ctx, `SELECT id FROM dynamic_configs WHERE project_id=$1 AND env_id=$2 AND name=$3`, projectID, envID, name).Scan(&id)
+	err := r.db.QueryRow(ctx, `SELECT id FROM dynamic_configs WHERE project_id=$1 AND env_id=$2 AND name_hash=$3`, projectID, envID, r.nameHash(name)).Scan(&id)
 	if dberr.IsNoRows(err) {
 		return uuid.Nil, ErrTokenNotFound
 	}
@@ -80,7 +99,7 @@ func (r *Repository) IDByName(ctx context.Context, projectID, envID uuid.UUID, n
 func (r *Repository) InsertLease(ctx context.Context, configID uuid.UUID, username string, exp time.Time, createdBy string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := r.db.QueryRow(ctx, `INSERT INTO dynamic_leases (config_id,username,expires_at,created_by) VALUES ($1,$2,$3,$4) RETURNING id`,
-		configID, username, exp, createdBy).Scan(&id)
+		configID, r.box.SealName(fUsername, username), exp, createdBy).Scan(&id)
 	return id, err
 }
 
@@ -97,6 +116,7 @@ func (r *Repository) Leases(ctx context.Context, configID, projectID uuid.UUID) 
 		if err := rows.Scan(&l.ID, &l.Username, &l.ExpiresAt, &l.RevokedAt, &l.CreatedBy, &l.CreatedAt, &l.RevokeError); err != nil {
 			return nil, err
 		}
+		l.Username, l.RevokeError = r.box.OpenName(fUsername, l.Username), r.box.OpenName(fRevErr, l.RevokeError)
 		out = append(out, l)
 	}
 	return out, rows.Err()
@@ -110,7 +130,11 @@ func (r *Repository) ActiveLease(ctx context.Context, leaseID uuid.UUID) (*Lease
 	if dberr.IsNoRows(err) {
 		return nil, nil
 	}
-	return t, err
+	if err != nil {
+		return nil, err
+	}
+	t.Username = r.box.OpenName(fUsername, t.Username)
+	return t, nil
 }
 
 func (r *Repository) MarkRevoked(ctx context.Context, leaseID uuid.UUID) {
@@ -118,7 +142,7 @@ func (r *Repository) MarkRevoked(ctx context.Context, leaseID uuid.UUID) {
 }
 
 func (r *Repository) MarkRevokeFailed(ctx context.Context, leaseID uuid.UUID, msg string) {
-	_, _ = r.db.Exec(ctx, `UPDATE dynamic_leases SET revoke_error=$2 WHERE id=$1`, leaseID, msg)
+	_, _ = r.db.Exec(ctx, `UPDATE dynamic_leases SET revoke_error=$2 WHERE id=$1`, leaseID, r.box.SealName(fRevErr, msg))
 }
 
 func (r *Repository) leaseIDs(ctx context.Context, where string, arg uuid.UUID) ([]uuid.UUID, error) {

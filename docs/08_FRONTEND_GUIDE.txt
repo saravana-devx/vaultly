@@ -4,7 +4,7 @@ React 18 + Vite. No UI library and no state library: plain CSS and React context
 
 BUILD AND SERVE
   Dev:  npm run dev (Vite on :5173, proxies /api to :8080)  - not used in the Docker setup
-  Prod: Dockerfile builds with `vite build`, nginx serves /usr/share/nginx/html and proxies
+  Prod: Dockerfile.web builds with `vite build`, nginx serves /usr/share/nginx/html and proxies
         /api/ to the backend (nginx.conf). Unknown paths fall back to index.html (SPA routing).
 
 ENTRY AND ROUTING
@@ -68,3 +68,30 @@ STATE PATTERNS
 KNOWN FRONTEND GAPS
   No tests, no TypeScript, no pagination controls (except audit), no dark/light toggle
   (dark only), minimal mobile polish on the app screens.
+
+
+LIGHT AND DARK THEME
+--------------------
+  public/theme-init.js runs before the app renders and sets <html data-theme="light|dark"> from the saved
+  choice (localStorage "vaultly-theme") or, if none, the operating system setting. The sun/moon button
+  (ThemeToggle in components/ui.jsx; landing nav and app top bar) flips it and saves the choice.
+  Dark colours are the default variables in styles.css; the light theme is one block at the end of the file
+  that overrides them. Palette: Emptiness #FBFCFC (panels), City Lights #E0E5E9 (canvas, borders), Light Teal
+  #B2C9C5 (stronger borders, scrollbars), Retro Lime #1BD488 (buttons, highlights, active nav), Wish Upon a Star
+  #45828B (accent, links), plus a deep slate #14232A for text and #16282F for the dark panels (hero terminal,
+  security section, sign-in side panel). Icons are quiet slate-grey, darker on hover, green when active.
+  Avatars take their colour from --h with lightness set per theme (--av-bg / --av-fg).
+  New CSS should use the variables (--bg, --surface, --ink, --muted, --line, --accent...) so both themes work.
+
+SCROLLING
+---------
+  Inside the app only .colmain scrolls (the page itself never does): the sidebar stays put, the top bar keeps
+  its size (flex: none), each route opens at the top, and dialogs freeze the area behind them (useScrollLock).
+  The landing page uses normal page scrolling with smooth anchor links.
+
+SIDEBAR
+-------
+components/Shell.jsx. Top: logo and a collapse button (icons-only mode, remembered in localStorage "vaultly-sidebar").
+Workspace switcher (a Menu: avatar, name, role; pick another workspace). Groups: General (Overview, Projects, Members,
+Audit log), Projects (every project with a colour dot and a + for admins), Support (Documentation, Settings). Bottom: a
+profile card that opens a menu (Settings, light/dark mode, Sign out). Below 960 px it becomes a top strip.

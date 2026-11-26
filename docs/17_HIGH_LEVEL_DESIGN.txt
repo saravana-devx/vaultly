@@ -1,0 +1,245 @@
+17 - HIGH-LEVEL DESIGN AND ARCHITECTURE
+========================================
+The "why it is built this way" view. For step-by-step flows read 16_HOW_IT_WORKS_FLOWCHARTS.txt;
+for code-level detail read 03 and 04.
+
+
+1. THE ONE-SENTENCE ANSWER
+--------------------------
+  Vaultly is a MODULAR MONOLITH: one stateless Go API with a layered structure inside
+  (handler -> service -> repository), a React single-page app in front, and a few specialised
+  infrastructure services around it (PostgreSQL, Redis, Kafka, OpenBao, a rate-limiter service).
+  It is not microservices: only things that really are separate concerns run as their own container.
+
+
+2. WHAT PROBLEM IT SOLVES
+-------------------------
+  Teams keep API keys and passwords in .env files, chat and CI settings. Vaultly is one place to
+  store them encrypted, control who can read which environment, see who touched what, and hand them
+  to apps and CI at run time.
+
+  Functional requirements
+    - workspaces, projects, environments (dev / staging / prod / custom), folders of secrets
+    - versioned secrets with rollback, rotation, expiry, tags, search, ${references}, .env import/export
+    - roles per workspace and overrides per environment; invitations
+    - machine access: service tokens scoped to one environment + path, optional IP allowlist; CLI
+    - audit log, webhooks, push to GitHub/Vercel/Railway, short-lived database logins, encrypted backup
+
+  Non-functional requirements (the ones that shaped the design)
+    - SECURITY FIRST: a database leak alone must not reveal secrets or even customer emails
+    - AUDITABILITY: every read and write of a secret is recorded, and the record must not be lost
+    - SIMPLE TO OPERATE: runs on one small server with Docker Compose
+    - HORIZONTALLY SCALABLE API: no state inside the process that cannot be rebuilt
+    - EXPLAINABLE: few moving parts, each with one clear job (it is a portfolio project)
+
+
+3. ARCHITECTURE STYLE
+---------------------
+  Layered (n-tier) inside a modular monolith, plus an event-driven side channel for auditing.
+
+     presentation   React SPA (served by nginx)                      frontend/
+     ──────────────────────────────────────────────────────────────────────────────────────
+     transport      routes -> middleware (CORS, auth, rate limit)    internal/routes, middleware
+                    -> handler (HTTP in/out only)                    internal/<domain>/handler.go
+     ──────────────────────────────────────────────────────────────────────────────────────
+     business       service (rules, permissions, audit events)       internal/<domain>/service.go
+     ──────────────────────────────────────────────────────────────────────────────────────
+     persistence    repository (SQL only)                            internal/<domain>/repository.go
+     ──────────────────────────────────────────────────────────────────────────────────────
+     infrastructure PostgreSQL · Redis · Kafka · OpenBao · SMTP      docker-compose
+
+  Rules that keep it clean
+    - Dependencies point downward only. A handler never touches SQL; a repository never checks roles.
+    - A service takes a principal.Actor and a context, never a gin.Context, so it is testable.
+    - Each layer talks to the next through an INTERFACE declared by the consumer (the service declares
+      its repository interface), so a fake can replace the database in tests.
+    - Errors are typed (apperr) and mapped to an HTTP status in exactly one place (httpx.Fail).
+    - One response envelope for everything: {success, message, data}.
+    - bootstrap/ is the only place that knows every concrete type (composition root).
+
+  Why a monolith: one deployable, one database transaction boundary, no network hops between
+  domains, trivial local setup. The domain packages are isolated enough that one could be extracted
+  later; the rate limiter already was, because it is genuinely independent.
+
+
+4. LOGICAL VIEW  (the building blocks)
+--------------------------------------
+
+   ┌─────────────────────────────────────────────────────────────────────────────────────────┐
+   │ CLIENTS    Browser (React)      CLI / CI / apps (service token)      scripts (personal)  │
+   └───────────────────────────────────────┬─────────────────────────────────────────────────┘
+                                           │ HTTPS  (Caddy -> nginx -> API)
+   ┌───────────────────────────────────────▼─────────────────────────────────────────────────┐
+   │ API  (one Go process)                                                                    │
+   │                                                                                          │
+   │  IDENTITY & ACCESS      user · token · access · invite · member · org                    │
+   │  SECRETS CORE           project · secret (+ references, versions) · keystore             │
+   │  AUTOMATION             webhook · integration · dynamic · backup                         │
+   │  OBSERVABILITY          audit (publish, consume, read)                                   │
+   │  CROSS-CUTTING          middleware · httpx · apperr · principal · janitor · ratelimit    │
+   │  PLATFORM               config · db · crypto · pii · mail · pathutil · tokenutil         │
+   └──────┬───────────────┬──────────────┬─────────────────┬───────────────────┬─────────────┘
+          │               │              │                 │                   │
+     PostgreSQL        Redis          Kafka            OpenBao            ratelimiter
+     system of        sessions,      audit event      wraps the data     service (+ its own
+     record           rate counters  stream           keys; root of      Postgres, shares
+                                                      trust              Redis)
+
+
+5. WHAT EACH DATA STORE IS FOR  (and why that one)
+---------------------------------------------------
+
+   PostgreSQL   everything that must survive: users, workspaces, projects, ciphertext, versions,
+                tokens (hashes), audit log. ACID transactions give safe versioned writes
+                (SELECT ... FOR UPDATE) and atomic signup/restore.
+   Redis        things that are fast and disposable: refresh tokens (single use, 7 days) and
+                sliding-window rate-limit counters. Atomic Lua scripts prevent races.
+   Kafka        the audit event stream. It takes audit writing off the request path, keeps one
+                workspace's events in order (key = org id), and can be replayed. The database is
+                still the source of truth; Kafka is the transport.
+   OpenBao      the ROOT OF TRUST. Its Transit engine wraps and unwraps per-project data keys
+                without ever exposing the root key. Local mode (a MASTER_KEY) exists for simple setups.
+   ratelimiter  an independent service that decides allow/deny. A separate repository, reused here
+                as a service instead of being copied. If it is unreachable the API uses its built-in
+                limiter, so it can never take the product down.
+
+   Why not one database for everything? Sessions and counters would be slow and noisy in Postgres,
+   and the key material must live in a different security domain from the data it protects.
+
+
+6. KEY DESIGN DECISIONS  (decision -> reason -> cost)
+-----------------------------------------------------
+
+   Envelope encryption, one key per project
+     -> a leaked database is useless without OpenBao; blast radius is one project; rotating the
+        root key re-wraps small keys instead of re-encrypting every secret.
+     -> an extra service to run and back up (losing OpenBao's data loses everything).
+
+   AAD = project id on every ciphertext
+     -> a ciphertext copied into another project fails authentication.
+
+   Personal data is encrypted too (emails, names, "who did it"), with an HMAC blind index
+     -> login can find an email without storing it readable; a DB dump leaks no addresses.
+     -> no partial-text search on emails; the index key cannot be rotated, only re-wrapped.
+
+   Short access token + single-use refresh cookie
+     -> the 15-minute JWT lives only in browser memory; the refresh token is HttpOnly and rotates
+        on every use, so a stolen cookie is detected by the next legitimate refresh.
+     -> needs Redis for the refresh store.
+
+   Separate credentials for people and machines
+     -> service tokens are scoped to one environment + path (+ IP allowlist) and can only call
+        /api/v1/*; they can never manage anything. Only hashes are stored; the raw value is shown once.
+
+   Permissions resolved per ENVIRONMENT, not only per workspace
+     -> "developer in dev, nothing in prod" is the real-world need. Hidden environments also vanish
+        from search, project views and ${reference} resolution, so nothing leaks sideways.
+
+   Append-only secret history
+     -> rollback writes a NEW version; nothing is ever edited in place.
+
+   Audit through Kafka with a database fallback
+     -> auditing never slows or blocks a request and an event is never silently dropped.
+     -> subscribers (webhooks, auto-sync) are at-most-once; the audit table itself is at-least-once
+        with idempotent inserts.
+
+   Rate limiting in a separate service with a local fallback
+     -> shows reuse of an independent component; failure of that component degrades gracefully.
+     -> one more container and a policy registry to understand.
+
+   Fail-open on rate limiting, fail-closed on security
+     -> if the limiter breaks, users are not locked out. Authentication, permissions, IP allowlists
+        and encryption never fail open.
+
+
+7. SECURITY ARCHITECTURE  (trust zones)
+---------------------------------------
+
+   ZONE 1  public internet        Caddy only (80/443): TLS, HSTS, CSP, security headers
+   ZONE 2  application            frontend (static) and API, on a private Docker network
+   ZONE 3  data                   Postgres, Redis, Kafka            - no published ports
+   ZONE 4  key service            OpenBao (+ bootstrap)             - no published ports
+   ZONE 5  target systems         the databases dynamic secrets manage, GitHub/Vercel/Railway
+
+   Controls by layer
+     edge        TLS, security headers, body size cap (nginx 64 MB, backup upload 64 MB), CORS allow-list
+     identity    bcrypt passwords, JWT + rotating refresh, personal and service tokens, IP allowlists
+     access      workspace role + per-environment override, checked in the SERVICE layer
+     data        envelope encryption, sealed personal data, hashed tokens, secret values never returned on writes
+     outbound    webhooks block private/loopback addresses at connect time (SSRF) and ignore redirects
+     operations  every action audited; sealed, passphrase-protected backups
+
+   Honest limits are listed in 07_SECURITY_MODEL.txt and 04_LOW_LEVEL_DESIGN.txt section K.
+
+
+8. DEPLOYMENT VIEW
+------------------
+
+   Development:  docker compose up        10 containers, all ports on localhost
+   Production:   docker-compose.prod.yml  one server (2-4 GB RAM)
+
+        Internet ─► Caddy ─┬─► frontend (nginx) ─► backend
+                           └─► backend
+                                   │  private network
+                  postgres · redis · kafka · openbao · ratelimiter(+db)  (named volumes, restart policies,
+                                                                          log rotation, passwords set)
+
+   Delivery: GitHub Actions runs vet + tests + builds; deploy/update.sh pulls and rebuilds on the server;
+   deploy/backup.sh captures the database AND the OpenBao state. Make targets wrap the common commands.
+
+
+9. SCALABILITY
+--------------
+
+   API            stateless: run several copies behind a load balancer.
+                   - key cache is per instance (just a cache)
+                   - Kafka consumer group splits audit work between instances
+                   - the janitor runs in every instance; its work is idempotent (UPDATE ... RETURNING and
+                     "revoke if not yet revoked"), so duplicates are harmless
+                   - NOT yet instance-safe: webhook retries and the auto-sync debounce timers live in
+                     memory (a crash loses pending retries)
+   PostgreSQL     the first bottleneck. Next steps: read replica for lists, connection pooler, pagination.
+   Redis          counters and refresh tokens are tiny; one node is plenty for a long time.
+   Kafka          one broker is enough for audit volume; partitions are keyed by workspace.
+   Honest position: built to be scale-READY, sized and tested for one small server.
+
+
+10. FAILURE BEHAVIOUR  (what happens when a part is down)
+----------------------------------------------------------
+
+   Component down      Effect                                               Handling
+   ------------------  ---------------------------------------------------  ----------------------------
+   ratelimiter service rate limits still apply                              fallback to the built-in limiter
+   Redis               login refresh fails; rate limiting fails open        users re-login; API keeps running
+   Kafka               audit events still saved                             direct INSERT fallback
+   OpenBao             cached project keys keep working ~60 s, then secret  restart it; unseal material is in
+                       reads/writes fail; new projects cannot be created    the volume + backups
+   PostgreSQL          everything fails (system of record)                  restart; restore from backup
+   SMTP                invitation emails not delivered                      the admin still gets the link
+   Webhook target      delivery fails after 3 attempts                      shown in the delivery history
+   Integration API     sync marked as error with the message                retried on the next change / "Sync now"
+
+
+11. DATA FLOW SUMMARY
+---------------------
+
+   WRITE   user ─► API (auth, limit) ─► service (permission, validate) ─► encrypt with project key
+                 ─► Postgres (transaction: secret + version) ─► audit event ─► Kafka ─► audit table
+                 ─► subscribers (webhooks, auto-sync)
+
+   READ    user/CLI ─► API (auth, limit) ─► service (permission) ─► Postgres ciphertext
+                 ─► decrypt with project key ─► resolve references ─► response ─► audit "read/fetch"
+
+   KEYS    OpenBao root key ─► wraps project key ─► encrypts secrets
+           (the root key never leaves OpenBao; project keys are unwrapped on demand and cached briefly)
+
+
+12. HOW TO EXPLAIN IT IN AN INTERVIEW  (30 seconds)
+---------------------------------------------------
+  "Vaultly is a self-hosted secrets manager. A React app and a CLI talk to one stateless Go API that is
+   organised as a layered modular monolith: handlers, services and repositories per domain. Secrets are
+   envelope-encrypted with a key per project, and those keys are wrapped by OpenBao, so a database leak
+   is not enough to read anything. Access is checked per environment, every action goes through a
+   Kafka-backed audit pipeline with a database fallback, and machines use scoped, IP-restricted tokens.
+   Rate limiting is a separate service I built earlier, used here with a local fallback. The whole thing
+   runs in Docker Compose on a small server, with encrypted backups."

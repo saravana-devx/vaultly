@@ -106,9 +106,47 @@ What is encrypted
      Kafka messages, so emails are not kept in the broker's log either
   Existing plaintext rows are encrypted automatically at startup (Backfill; safe to re-run).
 
-What stays readable (on purpose)
-  project names, environment names, secret KEY NAMES, paths, tags, comments, role names, timestamps,
-  token names. Encrypting them would break search, filtering and the audit views.
+WHAT IS ENCRYPTED, AND WHY  (the field policy, internal/pii sealedFields)
+  Rule: encrypt what is personal data about people or would help an attacker against a customer's systems.
+  Leave readable the labels a team browses and the database orders by. Encrypting those too adds cost
+  (no database sorting or filtering) and protects almost nothing.
+
+  ENCRYPTED (AES-256-GCM, the field name is bound into the ciphertext so a value copied to another column
+  does not open):
+    users: email, name (plus a blind index so login can find an email)
+    orgs.name                   workspaces default to "<person>'s workspace"
+    secrets: key name, comment  what a secret is for ("STRIPE_LIVE_KEY", "rotate with 1Password item X")
+    secret values               separate layer: per-project keys wrapped by OpenBao (see above)
+    service_tokens: token prefix (start of the credential), IP allowlist (network addresses)
+    personal_tokens: token prefix
+    webhooks.url                Slack/Discord-style URLs contain a token
+    webhook_deliveries.error, integrations.last_error, dynamic_leases.revoke_error   messages quote hosts and URLs
+    audit_logs: actor (emails), resource, IP address; also inside the Kafka messages
+    app_keys, integration/dynamic configs (credentials), invitation emails
+
+  READABLE:
+    project, environment and folder names, tags, token names, webhook names and event lists, integration and
+    dynamic-secret names, invitation and per-environment roles, audit metadata and action names, plus ids,
+    timestamps, version numbers, flags and counts.
+  Someone with a database dump can see how a team is organised (projects, environments, folders, tag names)
+  and how active it is. They cannot see people, secret values, what any secret is called, where tokens may
+  connect from, or webhook endpoints.
+
+  Moving a field either way is one line in sealedFields; on the next start the conversion (Backfill) seals or
+  unseals the existing rows. Reads accept both forms, so nothing breaks mid-way.
+
+  Lookups the database still does on sealed or readable data use keyed hashes (HMAC with the index key, per field):
+    secrets.lookup_hash / path_hash   unique (environment, folder, key); the key name is sealed
+    environments.slug_hash, member_env_roles.env_slug_hash, dynamic_configs.name_hash
+  A hash reveals only "these two values are equal". Secret search (which looks into sealed key names and
+  comments) and folder listing run in the application after decrypting one environment's rows.
+  Arrays and JSON columns (tags, events, allowed_cidrs, env_roles, audit metadata) are text columns since
+  migration 004; the value is sealed or plain JSON as the policy says.
+
+  A common question: "should secret values be encrypted a second time?" No. A second layer with a key the
+  same server holds protects against nothing the first layer does not (an attacker with the database alone
+  sees ciphertext; an attacker inside the running server has both keys). Spend effort on OpenBao hardening
+  (TLS, auto-unseal, separate host), key rotation (`server rewrap`), least-privilege tokens and audit review.
 
 How the code uses it
   user/service.go    Register stores sealed values; Login looks up by Index(email), then bcrypt;

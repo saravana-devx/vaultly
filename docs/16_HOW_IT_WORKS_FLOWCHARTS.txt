@@ -1,0 +1,434 @@
+16 - HOW IT ACTUALLY WORKS (FLOWCHARTS)
+=======================================
+Read top to bottom. Every chart matches the code. File names are in [brackets].
+Legend:  [ box ] = a step   < diamond > = a decision   ──► = flow   ✗ = request stops with an error
+
+
+1. THE BIG PICTURE  (what runs, and who talks to whom)
+-------------------------------------------------------
+
+   ┌────────────┐   https    ┌─────────┐        ┌──────────────────────────────────────────┐
+   │  Browser   │───────────►│  Caddy  │──────► │ nginx (frontend)  static React build     │
+   └────────────┘            │ (prod)  │  /api  └──────────────────┬───────────────────────┘
+   ┌────────────┐            │  TLS    │                           │ /api/* proxied
+   │ CLI / CI / │───────────►└─────────┘                           ▼
+   │ apps (vst_)│  /api/v1/*                          ┌─────────────────────────────┐
+   └────────────┘                                     │   Go API  (one process)     │
+                                                      │   HTTP + Kafka consumer     │
+                                                      │   + janitor goroutine       │
+                                                      └─┬────┬─────┬──────┬───────┬─┘
+                          ┌─────────────────────────────┘    │     │      │       └────────────┐
+                          ▼                                  ▼     ▼      ▼                    ▼
+                   ┌─────────────┐                    ┌────────┐ ┌─────┐ ┌─────────┐   ┌──────────────┐
+                   │ PostgreSQL  │                    │ Redis  │ │Kafka│ │ OpenBao │   │ ratelimiter  │
+                   │ all durable │                    │refresh │ │audit│ │ Transit │   │ service      │
+                   │ data        │                    │tokens, │ │topic│ │ wraps   │   │ (own Postgres│
+                   └─────────────┘                    │counters│ └──┬──┘ │ the keys│   │  + same Redis)│
+                          ▲                           └────────┘    │    └─────────┘   └──────────────┘
+                          └──── audit consumer (inside the API) ◄───┘
+   Mailpit (dev) catches invitation emails.    Target Postgres (yours) is used by dynamic secrets.
+
+
+2. STARTUP  (what main.go does, in order)
+------------------------------------------
+
+   [config.Load]  JWT_SECRET required, DB/Redis/Kafka/OpenBao settings
+        │
+        ▼
+   [db.Connect + db.Migrate]  retries ~30 s, runs embedded SQL (idempotent)
+        │
+        ▼
+   [buildKeys]  KEY_PROVIDER=local ─► MASTER_KEY        openbao ─► waits until OpenBao answers
+        │
+        ▼
+   < argument "rewrap"? > ──yes──► re-wrap every stored key under the newest OpenBao key ──► exit
+        │ no
+        ▼
+   [pii.Load + Backfill]  create/open the 2 personal-data keys, encrypt any old plaintext rows
+        │
+        ▼
+   [Redis ping]  ✗ exit if unreachable
+        │
+        ▼
+   [audit.New + go Run]  create Kafka topic, start consumer group
+        │
+        ▼
+   [bootstrap.New]  repositories ─► services ─► handlers ─► routes + middleware
+                    registers audit subscribers: webhook dispatcher, integration auto-sync
+        │
+        ▼
+   [app.Run]  janitor every 20 s  +  HTTP server on :8080  +  graceful shutdown on SIGTERM
+
+
+3. ANY API REQUEST  (the layers every call goes through)
+----------------------------------------------------------
+
+   request
+      │
+      ▼
+   [Recovery, Logger, CORS, security headers]                     [middleware]
+      │
+      ▼
+   [Limit "ip" 600/min]  ──too many──► 429 + Retry-After ✗
+      │
+      ▼
+   [UserAuth]  Bearer vpt_… ─► look up personal-token hash        [middleware → token service]
+               otherwise     ─► verify JWT                        ✗ 401 if invalid
+      │         result: principal.Actor {user, email, ip}
+      ▼
+   [Limit "user" 600/min]  ──too many──► 429 ✗
+      │
+      ▼
+   [handler]   bind + validate JSON  ──invalid──► 400 {errors:[field,message]} ✗
+      │
+      ▼
+   [service]   business rules + permission check (access)         ──not allowed──► 403 / 404 ✗
+      │
+      ▼
+   [repository]  SQL only
+      │
+      ▼
+   [handler]   httpx.Success  ──►  {"success":true,"message":"…","data":{…}}
+               any error      ──►  httpx.Fail maps its kind to a status (400/401/403/404/409/410/502)
+                                   unknown errors are logged and shown as a generic 500
+
+
+4. SIGN UP, LOGIN AND STAYING SIGNED IN
+----------------------------------------
+
+   SIGN UP  POST /auth/register  [10/hour per IP]
+   ┌───────────────────────────────────────────────────────────────────────────────┐
+   │ validate ─► email taken? (blind index) ─► bcrypt password ─► seal email + name │
+   │ ─► in ONE transaction: create user + workspace + admin membership              │
+   │ ─► issue tokens (below)                                                        │
+   └───────────────────────────────────────────────────────────────────────────────┘
+
+   LOGIN  POST /auth/login  [10/min per IP]
+   email ─► Index(email) = HMAC blind index ─► find user row
+        │            └─ not found: still runs bcrypt on a dummy hash (same timing) ─► 401
+        ▼
+   open sealed email/name ─► bcrypt check ──wrong──► 401 "Invalid email or password" ✗
+        │ ok
+        ▼
+   ┌──────────────────────────────────────────────────────────────────────────────┐
+   │ access token  = JWT, 15 min   ──► JSON body; the browser keeps it in MEMORY   │
+   │ refresh token = random 32 B   ──► Redis (key = sha256, 7 days)                │
+   │                                  cookie vaultly_rt: HttpOnly, SameSite=Strict, │
+   │                                  Secure on https, path /api/auth               │
+   └──────────────────────────────────────────────────────────────────────────────┘
+
+   ANY LATER CALL  (frontend/src/api.js)
+   call with access token ──► 401? ──no──► done
+                               │ yes
+                               ▼
+        POST /auth/refresh (cookie)  ──► Redis GETDEL: a refresh token works ONCE
+                               │
+              ┌── ok ──────────┴────────── fail ──┐
+              ▼                                   ▼
+   new access + new refresh cookie         event "vaultly:logout" ─► back to /login
+   retry the original call
+
+
+5. SAVING A SECRET  (PUT /projects/:pid/secrets)
+-------------------------------------------------
+
+   [secret handler]  bind {env, path, key, value, comment, tags, expires_at}
+        │
+        ▼
+   [service.Put]
+        │
+        ├─► access.Project(viewer): join projects + memberships ─► workspace role
+        │        └─ not a member ─► 404 (existence is not revealed)
+        ├─► validate: key regex, path (no "." / ".."), value ≤ 64 KB, tags ≤ 10, expiry in future ─► 400 ✗
+        ├─► access.NeedEnv(developer): environment override wins, else workspace role ─► 403 ✗
+        ├─► keystore.ProjectKey ─► project DEK (cached ~60 s, else OpenBao unwraps it)
+        ├─► crypto.Encrypt: AES-256-GCM, random nonce, AAD = project id
+        │
+        ▼
+   [repository.Upsert]  ONE transaction
+        │   SELECT … FOR UPDATE   (concurrent writers of this secret wait)
+        │   no row ─► INSERT version 1        row ─► UPDATE version + 1
+        │   INSERT secret_versions (append-only history)
+        ▼
+   [audit.Record]  "secret.create" / "secret.update"  (see chart 8)
+        ▼
+   200 {"message":"Secret saved","data":{id, version, …}}   ──► UI shows the toast
+
+
+6. READING A SECRET  (reveal in the UI)  GET /projects/:pid/secrets/:sid  [60/min per user]
+------------------------------------------------------------------------------------------
+
+   load row ─► access.NeedEnv(viewer) for THAT secret's environment ─► 403 ✗
+        │
+        ▼
+   DEK ─► AES-GCM decrypt (AAD = project id)
+        │
+        ▼
+   value contains "${" ?  ──yes──►  resolve references  (chart 7)
+        │
+        ▼
+   audit "secret.read" ─► return {value, resolved?}
+
+   Listing (GET …/secrets) NEVER decrypts: it returns key names, tags, versions, expiry only.
+
+
+7. SECRET REFERENCES  ${KEY}  ${/path/KEY}  ${env:/path/KEY}   [secret/resolver.go]
+-------------------------------------------------------------------------------------
+
+   value "postgres://app:pw@${DB_HOST}:5432/app"
+        │
+        ▼  for each ${…} found
+   < allowed to read that env + path? >  ──no──► leave the text exactly as written
+        │ yes                               (user: environment role,  token: its env + path prefix)
+        ▼
+   < already visiting this env|path|key? > ──yes (cycle)──► leave literal
+        │ no
+        ▼
+   look up live (non-expired) secret ─► decrypt ─► expand it too (depth limit 8)
+        │
+        ▼
+   replace the ${…} with the result ;  not found ─► leave literal
+
+
+8. AUDIT TRAIL  (every important action)
+-----------------------------------------
+
+   service calls audit.Record(actor, org, project, action, resource, metadata)
+        │
+        ▼
+   [Publish]  seal actor/resource (encrypt emails) ─► Kafka topic vaultly.audit
+        │            key = org id  (same org ─► same partition ─► ordered)
+        │
+        └── Kafka down? ──► INSERT into audit_logs directly (nothing is lost)
+
+   Kafka ──► [consumer group, inside the API]
+                  │
+                  ▼
+        INSERT audit_logs  ON CONFLICT DO NOTHING   (safe to retry, no duplicates)
+                  │
+                  ▼
+        commit the offset
+                  │
+                  ▼
+        notify subscribers (open the event first)
+            ├──► webhook dispatcher        (chart 11)
+            └──► integration auto-sync     (chart 12)
+
+   Admins read it:  GET /orgs/:org/audit?before=…&project_id=…   (50 per page, newest first)
+
+
+9. HOW A SCRIPT, CI JOB OR THE CLI GETS SECRETS  (service tokens)
+------------------------------------------------------------------
+
+   admin creates a token:  project + ONE environment + path prefix + read/write + expiry + IP allowlist
+   the raw "vst_…" is shown ONCE; only its SHA-256 hash is stored
+
+   $ vaultly pull / run        GET /api/v1/secrets?recursive=true
+        │
+        ▼
+   [ServiceAuth]  Bearer must start with vst_ ─► hash lookup ─► expired? ─► 401 ✗
+        │
+        ▼
+   < client IP inside the allowlist? > ──no──► audit "token.denied" + 403 ✗
+        │ yes
+        ▼
+   [Limit "token" 600/min]
+        │
+        ▼
+   [service.Fetch]
+        ├─► requested path inside the token's prefix?  ──no──► 403 ✗   ("/stripe2" is not inside "/stripe")
+        ├─► read live (non-expired) secrets of ITS environment only
+        ├─► decrypt, resolve references only inside its own env + path
+        └─► audit "secret.fetch"
+        │
+        ▼
+   format=dotenv|shell ─► plain text      format=json ─► {success, message, data:{secrets:{…}}}
+
+   `vaultly run -- node server.js` fetches as JSON and starts the command with the secrets as env vars.
+
+
+10. ENCRYPTION AT REST  (who can read what)
+--------------------------------------------
+
+   ┌────────────────────────────┐   wraps    ┌─────────────────────────┐   encrypts   ┌──────────────┐
+   │ OpenBao Transit key        │──────────► │ per-project data key    │─────────────►│ secret values│
+   │ "vaultly"  (never leaves   │  / unwraps │ (DEK, 32 random bytes)  │  AES-256-GCM │ + versions   │
+   │  OpenBao)                  │            │ stored wrapped in       │  AAD=project │ in Postgres  │
+   │ or MASTER_KEY (local mode) │            │ projects.encrypted_dek  │              └──────────────┘
+   └────────────────────────────┘            └─────────────────────────┘
+          │ also wraps
+          ▼
+   ┌─────────────────────────────┐  seals   emails, names, "who did it" columns
+   │ 2 personal-data keys        │─────────►  and a blind index (HMAC) so login can find an email
+   │ (table app_keys)            │            without storing it readable
+   └─────────────────────────────┘
+
+   A stolen database alone shows ciphertext only. An attacker needs the database AND OpenBao.
+   Key rotation: `server rewrap` re-wraps the small keys; secret values are not re-encrypted.
+
+
+11. WEBHOOKS
+-------------
+
+   audit event ──► [Dispatcher.Handle]
+                      │  skip events without a project, and webhook.* events
+                      ▼
+              find the project's ACTIVE hooks whose event patterns match (secret.*, token.create, *)
+                      │
+                      ▼  each hook, in its own goroutine
+              body = JSON (never contains secret values)
+              signature = HMAC-SHA256(secret, "timestamp.body")  ─► header X-Vaultly-Signature
+                      │
+                      ▼
+              POST to the URL ── private/loopback address? ─► blocked at connect time (SSRF) ✗
+                      │            redirects are not followed
+                      ├─ 2xx ─────────────────────────────────► record delivery
+                      └─ failure ─► retry after 1 s, then 5 s ─► record delivery (keep last 100)
+
+
+12. INTEGRATIONS  (GitHub / Vercel / Railway)
+----------------------------------------------
+
+   a write event (secret.create / update / rotate / rollback / import)
+        │
+        ▼
+   auto-sync integrations for that project + environment
+        │
+        ▼
+   debounce 3 s  (many quick edits ─► one push)
+        │
+        ▼
+   collect the environment's path with references resolved ─► provider.Push ─► record status
+   (deletes are NOT propagated)       "Sync now" in the UI runs the same push on demand
+
+
+13. DYNAMIC SECRETS  (temporary database logins)
+-------------------------------------------------
+
+   POST …/dynamic/:id/lease  (user with developer access)   or   POST /api/v1/dynamic/:name/lease (token)
+        │
+        ▼
+   decrypt the stored admin connection URL
+        │
+        ▼
+   username "v_" + 16 random,  password 32 random
+        │
+        ▼
+   target Postgres:  CREATE ROLE … LOGIN PASSWORD … VALID UNTIL <expiry>
+                     run the admin's GRANT templates      ✗ any failure rolls the role back
+        │
+        ▼
+   INSERT dynamic_leases ──► return {username, password, connection_url, expires_at}  (shown ONCE)
+
+   JANITOR (every 20 s)  ─► for each expired, un-revoked lease:
+        end sessions ─► DROP OWNED BY ─► DROP ROLE ─► mark revoked
+   Deleting a project / environment / dynamic secret revokes its leases FIRST.
+   The same janitor loop also publishes "secret.expired" events for secrets that just expired.
+
+
+14. RATE LIMITING  (every limit on the API)
+--------------------------------------------
+
+   middleware.Limit(name, limit, window, key)      key = IP, user id or token id
+        │
+        ▼
+   [ratelimit.Remote]  ── policy "vaultly-<limit>-<seconds>" known? ─no─► register it in the service
+        │
+        ▼
+   POST ratelimiter:8080/api/v1/check  (X-API-Key of that policy, identifier = rl:<name>:<key>)
+        │                                         │
+        │                          Redis Lua script, atomic sliding window
+        │                          (trim old hits ─► count ─► reject, or add)
+        │
+        ├── service unreachable ──► [local sliding window in the API]  same algorithm, same Redis
+        │                                  │
+        │                                  └── that fails too ──► request is ALLOWED (fail open)
+        ▼
+   allowed  ─► X-RateLimit-* headers ─► continue
+   rejected ─► 429 + Retry-After, "Too many requests, try again in Ns" ✗
+
+
+15. INVITING SOMEONE
+---------------------
+
+   admin: POST /orgs/:org/invites {email, role, env_roles}
+        │
+        ▼
+   already a member? ─yes─► 409 ✗
+        │ no
+        ▼
+   raw token "vin_…" ─► store only its hash, the sealed email, role, env overrides, 7-day expiry
+        │         (an older pending invite for the same email is replaced)
+        ▼
+   email the link  APP_URL/invite/<raw>   (Mailpit in dev; logged if SMTP is not set)  + return the link
+
+   invitee opens the link:  GET /invites/:token  (public, email masked, shows org + role)
+        │
+        ▼
+   < has an account? > ─no─► sign up first        yes ─► sign in
+        │
+        ▼
+   POST /invites/:token/accept
+        ├─ expired or already used ─► 410 ✗
+        ├─ signed in with a different email ─► 403 ✗
+        └─ ok: create membership + environment overrides, mark accepted, audit "member.join"
+
+
+16. WHO MAY DO WHAT  (permission check)
+----------------------------------------
+
+   workspace role: admin ─ developer ─ viewer          (rank 3 ─ 2 ─ 1; "none" = 0)
+
+   need environment access?
+        │
+        ▼
+   < caller is workspace admin? > ──yes──► admin everywhere
+        │ no
+        ▼
+   < override for this user + environment NAME? >
+        │ yes ─► use it: none | viewer | developer      (can restrict OR grant)
+        │ no
+        ▼
+   use the workspace role
+        │
+        ▼
+   rank ≥ needed?  ──no──► 403 "you need developer access to the prod environment" ✗
+
+   Non-admins also never SEE environments they cannot access (project view, search, references).
+
+
+17. BACKUP AND RESTORE
+-----------------------
+
+   BACKUP  POST /orgs/:org/backup {passphrase ≥ 12}  [5/hour]   (admin)
+   read every project + environments + secrets + versions (still ENCRYPTED)
+        ─► JSON ─► gzip ─► key = scrypt(passphrase, salt) ─► AES-256-GCM
+        ─► file "VLTYBK1 | salt | nonce | data"  (.vbk download)
+   left out on purpose: tokens, webhooks, integration credentials
+
+   RESTORE  POST /orgs/:org/restore  (file + passphrase)  [5/hour]
+   open the file ✗ wrong passphrase / not a backup
+        │
+        ▼  for each project in the file
+   < project id already exists? > ──yes──► skip ("already exists")
+        │ no
+        ▼
+   < its data key unwraps with the CURRENT key service? > ──no──► skip ("different MASTER_KEY")
+        │ yes
+        ▼
+   insert project, environments, secrets, versions in ONE transaction (original ids kept)
+        └─ failure ─► rolled back, reported as skipped
+
+
+18. DEPLOYMENT  (production, one small server)
+-----------------------------------------------
+
+   Internet ──► :80/:443  Caddy  (automatic HTTPS, CSP + security headers)
+                   ├──► frontend (nginx)  ──/api──► backend
+                   └──► backend
+                              private Docker network, NO published ports:
+                              postgres · redis · kafka · openbao (+bootstrap) · ratelimiter · ratelimiter-db
+
+   deploy/backup.sh  ─► DB dump + OpenBao snapshot + unseal material (optionally encrypted)
+   deploy/update.sh  ─► pull, rebuild, restart
+   See 14_GO_LIVE_RUNBOOK.txt.

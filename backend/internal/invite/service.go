@@ -83,6 +83,7 @@ func (s *Service) Create(ctx context.Context, a principal.Actor, org uuid.UUID, 
 	}
 	link := s.appURL + "/invite/" + raw
 	orgName, _ := s.repo.OrgName(ctx, org)
+	orgName = s.pii.OpenName("orgs.name", orgName)
 	go s.sendEmail(email, orgName, a.Label(), req.Role, link)
 	s.audit.Record(ctx, a, org, nil, "member.invite", email, map[string]any{"role": req.Role})
 	return &Created{ID: id, Email: email, Role: req.Role, Link: link}, nil
@@ -142,7 +143,7 @@ func (s *Service) Preview(ctx context.Context, token string) (*Preview, error) {
 	case inv.ExpiresAt.Before(time.Now()):
 		state = "expired"
 	}
-	return &Preview{Org: inv.OrgName, EmailHint: maskEmail(email), Role: inv.Role, InvitedBy: s.pii.OpenLabel(inv.InvitedBy),
+	return &Preview{Org: s.pii.OpenName("orgs.name", inv.OrgName), EmailHint: maskEmail(email), Role: inv.Role, InvitedBy: s.pii.OpenLabel(inv.InvitedBy),
 		State: state, HasAccount: s.users.EmailExists(ctx, email)}, nil
 }
 
@@ -161,7 +162,7 @@ func (s *Service) Accept(ctx context.Context, a principal.Actor, token string) (
 		return nil, err
 	}
 	s.audit.Record(ctx, a, inv.OrgID, nil, "member.join", a.Email, map[string]any{"role": inv.Role})
-	return &Accepted{OrgID: inv.OrgID, Org: inv.OrgName, Role: inv.Role}, nil
+	return &Accepted{OrgID: inv.OrgID, Org: s.pii.OpenName("orgs.name", inv.OrgName), Role: inv.Role}, nil
 }
 
 func (s *Service) load(ctx context.Context, token string) (*Invite, string, error) {

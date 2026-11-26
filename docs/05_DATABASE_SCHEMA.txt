@@ -78,3 +78,15 @@ WHAT IS ENCRYPTED AT REST
   webhooks.secret_enc, integrations.config_enc, dynamic_configs.config_enc (project key)
   Hashed (one-way): users.password_hash (bcrypt), every *token_hash (SHA-256)
   Plain: project/environment names, paths, secret KEY NAMES, tags, comments, audit metadata.
+
+
+FIELD ENCRYPTION NOTE (migration 004)
+-------------------------------------
+Which columns hold sealed values ("enc:v1:...") is decided by the policy in internal/pii (sealedFields) and listed in
+13_OPENBAO_AND_PII_ENCRYPTION.txt. Sealed today: users.email/name, orgs.name, secrets.key/comment,
+service_tokens.token_prefix/allowed_cidrs, personal_tokens.token_prefix, webhooks.url, webhook_deliveries.error,
+integrations.last_error, dynamic_leases.revoke_error, audit_logs.actor_label/resource/ip. Everything else is readable.
+Migration 004 turned the array/jsonb columns (secrets.tags, service_tokens.allowed_cidrs, webhooks.events,
+invites.env_roles, audit_logs.metadata) into text and added lookup hashes: environments.slug_hash,
+secrets.path_hash and lookup_hash, member_env_roles.env_slug_hash, dynamic_configs.name_hash (unique indexes replace the
+old unique constraints on slug, (env, path, key) and (project, env, name)). The secrets GIN tag index was dropped.
