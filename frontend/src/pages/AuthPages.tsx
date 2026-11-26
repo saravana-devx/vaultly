@@ -1,9 +1,11 @@
+import type { Row } from '../types'
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { useAuth } from '../auth.jsx'
-import { Logo } from '../components/ui.jsx'
+import { useAuth } from '../auth'
+import { Logo } from '../components/ui'
 
-function Aside({ heading }) {
+function Aside({ heading }: { heading: ReactNode }) {
   return (
     <aside className="auth-r">
       <h2>{heading}</h2>
@@ -19,7 +21,7 @@ function Aside({ heading }) {
   )
 }
 
-function Layout({ title, sub, onSubmit, cta, alt, aside, children }) {
+function Layout({ title, sub, onSubmit, cta, alt, aside, children }: { title: string; sub?: string; onSubmit: (...args: any[]) => void; cta: string; alt?: any; aside?: any; children: ReactNode }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   return (
@@ -44,11 +46,11 @@ function Layout({ title, sub, onSubmit, cta, alt, aside, children }) {
   )
 }
 
-function Field({ label, hint, children }) {
+function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return <div className="field"><label>{label}{hint && <span className="hint">{hint}</span>}</label>{children}</div>
 }
 
-function Password({ name, autoComplete, placeholder, onChange }) {
+function Password({ name, autoComplete, placeholder, onChange }: { name: string; autoComplete: string; placeholder?: string; onChange?: (...args: any[]) => void }) {
   const [show, setShow] = useState(false)
   return (
     <div className="pwd">
@@ -58,7 +60,7 @@ function Password({ name, autoComplete, placeholder, onChange }) {
   )
 }
 
-const safeNext = (p) => { const n = p.get('next'); return n && n.startsWith('/') && !n.startsWith('//') ? n : '/app' }
+const safeNext = (p: URLSearchParams) => { const n = p.get('next'); return n && n.startsWith('/') && !n.startsWith('//') ? n : '/app' }
 
 export function Login() {
   const { login } = useAuth(); const nav = useNavigate(); const [params] = useSearchParams()
@@ -73,7 +75,7 @@ export function Login() {
   )
 }
 
-const strength = (p) => (p.length === 0 ? 0 : Math.min(4, (p.length >= 8) + (p.length >= 12) + (/[A-Z]/.test(p) && /[a-z]/.test(p)) + (/\d/.test(p) && /[^A-Za-z0-9]/.test(p))) || 1)
+const strength = (p: any) => (p.length === 0 ? 0 : Math.min(4, Number(p.length >= 8) + Number(p.length >= 12) + Number(/[A-Z]/.test(p) && /[a-z]/.test(p)) + Number(/\d/.test(p) && /[^A-Za-z0-9]/.test(p))) || 1)
 const labels = ['', 'Weak', 'Okay', 'Good', 'Strong']
 
 export function Register() {

@@ -78,7 +78,7 @@ services:
       context: ./deploy/ratelimiter
       dockerfile: Dockerfile.server
       additional_contexts:
-        src: ${RATELIMITER_SRC:-../../Distributed-rate-limiter}
+        src: ${RATELIMITER_SRC:-../Distributed-rate-limiter}
     container_name: vaultly-ratelimiter
     environment:
       <<: *ratelimiter-env

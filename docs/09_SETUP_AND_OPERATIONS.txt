@@ -111,7 +111,7 @@ every rate-limit decision (RATELIMITER_URL=http://ratelimiter:8080) and falls ba
 limiter if the service is down. Its admin API has no authentication, so its port is NOT published.
 Its one-table schema is deploy/ratelimiter/001_clients.sql (mounted into ratelimiter-db).
 Where the source comes from (RATELIMITER_SRC):
-  dev   default ../../Distributed-rate-limiter  (a sibling folder of this repo)
+  dev   default ../Distributed-rate-limiter  (a sibling folder of this repo)
   prod  default https://github.com/saravana-devx/Distributed-rate-limiter.git
         If that repository is private, clone it next to this one on the server and set
         RATELIMITER_SRC=../Distributed-rate-limiter in .env.

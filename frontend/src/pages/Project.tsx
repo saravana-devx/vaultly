@@ -1,22 +1,24 @@
+import type { FormEvent } from 'react'
+import type { Row } from '../types'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api.js'
+import { api } from '../api'
 import { Link } from 'react-router-dom'
-import { Avatar, Menu, Modal, Icon, copy, shortName } from '../components/ui.jsx'
-import { ask, toast } from '../components/feedback.jsx'
-import { EnvTag, StateDot, Rel, RowMenu, TableFoot, EmptyRow, plural } from '../components/table.jsx'
-import Integrations from './project/Integrations.jsx'
-import Webhooks from './project/Webhooks.jsx'
-import Dynamic from './project/Dynamic.jsx'
+import { Avatar, Menu, Modal, Icon, copy, shortName } from '../components/ui'
+import { ask, toast } from '../components/feedback'
+import { EnvTag, StateDot, Rel, RowMenu, TableFoot, EmptyRow, plural } from '../components/table'
+import Integrations from './project/Integrations'
+import Webhooks from './project/Webhooks'
+import Dynamic from './project/Dynamic'
 
 export default function Project() {
   const { pid } = useParams()
   const nav = useNavigate()
-  const [project, setProject] = useState(null)
+  const [project, setProject] = useState<Row | null>(null)
   const [env, setEnv] = useState('')
   const [tab, setTab] = useState('secrets')
 
-  const load = useCallback(() => api(`/projects/${pid}`).then((p) => { setProject(p); setEnv((e) => (p.environments.some((x) => x.slug === e) ? e : p.environments[0]?.slug || '')) }), [pid])
+  const load = useCallback(() => api(`/projects/${pid}`).then((p) => { setProject(p); setEnv((e) => (p.environments.some((x: Row) => x.slug === e) ? e : p.environments[0]?.slug || '')) }), [pid])
   useEffect(() => { setProject(null); setTab('secrets'); setEnv(''); load().catch(() => nav('/app/projects')) }, [load, nav])
   if (!project) return <div className="spinner" style={{ margin: 40 }} />
   const admin = project.role === 'admin'
@@ -47,30 +49,30 @@ export default function Project() {
   )
 }
 
-function EnvPicker({ project, env, setEnv }) {
-  return <div className="seg" role="tablist">{project.environments.map((e) => <button key={e.id} role="tab" aria-selected={env === e.slug} className={env === e.slug ? 'on' : ''} onClick={() => setEnv(e.slug)}>{e.name}</button>)}</div>
+function EnvPicker({ project, env, setEnv }: { project: Row; env: string; setEnv: (...args: any[]) => void }) {
+  return <div className="seg" role="tablist">{project.environments.map((e: any) => <button key={e.id} role="tab" aria-selected={env === e.slug} className={env === e.slug ? 'on' : ''} onClick={() => setEnv(e.slug)}>{e.name}</button>)}</div>
 }
 
-function Secrets({ project, env, setEnv, canWrite }) {
+function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string; setEnv: (...args: any[]) => void; canWrite: boolean }) {
   const pid = project.id
   const [path, setPath] = useState('/')
-  const [data, setData] = useState(null)
-  const [revealed, setRevealed] = useState({})
-  const [edit, setEdit] = useState(null)
-  const [hist, setHist] = useState(null)
+  const [data, setData] = useState<Row | null>(null)
+  const [revealed, setRevealed] = useState<Record<string, any>>({})
+  const [edit, setEdit] = useState<Row | null>(null)
+  const [hist, setHist] = useState<Row | null>(null)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [tag, setTag] = useState('')
-  const [allTags, setAllTags] = useState([])
-  const [resolved, setResolved] = useState({})
+  const [allTags, setAllTags] = useState<string[]>([])
+  const [resolved, setResolved] = useState<Record<string, any>>({})
   const [q, setQ] = useState('')
-  const [found, setFound] = useState(null)
+  const [found, setFound] = useState<Row[] | null>(null)
 
   const load = useCallback(() => {
     if (!env) return
     api(`/projects/${pid}/secrets?env=${env}&path=${encodeURIComponent(path)}${tag ? `&tag=${encodeURIComponent(tag)}` : ''}`).then((d) => {
       setData(d); setError('')
-      if (!tag) setAllTags([...new Set(d.secrets.flatMap((x) => x.tags || []))].sort())
+      if (!tag) setAllTags([...new Set<string>(d.secrets.flatMap((x: any) => x.tags || []))].sort())
     }).catch((e) => setError(e.message))
   }, [pid, env, path, tag])
   useEffect(() => { setRevealed({}); setResolved({}); load() }, [load])
@@ -81,15 +83,15 @@ function Secrets({ project, env, setEnv, canWrite }) {
     return () => clearTimeout(t)
   }, [q, pid])
 
-  const reveal = async (s) => {
+  const reveal = async (s: Row) => {
     if (revealed[s.id] !== undefined) return setRevealed((r) => { const n = { ...r }; delete n[s.id]; return n })
     const d = await api(`/projects/${pid}/secrets/${s.id}`)
     setRevealed((r) => ({ ...r, [s.id]: d.value }))
     setResolved((r) => ({ ...r, [s.id]: d.resolved }))
   }
-  const copyVal = async (s) => { const d = await api(`/projects/${pid}/secrets/${s.id}`); copy(d.value, 'Copied to clipboard') }
-  const del = async (s) => { if (await ask(`Delete ${s.key}?`, { confirm: 'Delete', danger: true })) { await api(`/projects/${pid}/secrets/${s.id}`, { method: 'DELETE' }); load() } }
-  const rotate = async (s) => {
+  const copyVal = async (s: Row) => { const d = await api(`/projects/${pid}/secrets/${s.id}`); copy(d.value, 'Copied to clipboard') }
+  const del = async (s: Row) => { if (await ask(`Delete ${s.key}?`, { confirm: 'Delete', danger: true })) { await api(`/projects/${pid}/secrets/${s.id}`, { method: 'DELETE' }); load() } }
+  const rotate = async (s: Row) => {
     if (!await ask(`Rotate ${s.key}? A new random value will replace the current one.`, { confirm: 'Rotate' })) return
     const d = await api(`/projects/${pid}/secrets/${s.id}/rotate`, { method: 'POST', body: {} })
     setRevealed((r) => ({ ...r, [s.id]: d.value })); load()
@@ -103,8 +105,8 @@ function Secrets({ project, env, setEnv, canWrite }) {
   const rows = data?.secrets || []
   const folders = tag ? [] : data?.folders || []
   const searching = q.trim().length >= 2
-  const jump = (r) => { setQ(''); setEnv(r.env); setPath(r.path) }
-  const editSecret = async (s) => { const d = await api(`/projects/${pid}/secrets/${s.id}`); setEdit({ ...s, value: d.value }) }
+  const jump = (r: Row) => { setQ(''); setEnv(r.env); setPath(r.path) }
+  const editSecret = async (s: Row) => { const d = await api(`/projects/${pid}/secrets/${s.id}`); setEdit({ ...s, value: d.value }) }
   return (
     <>
       <div className="bar">
@@ -122,11 +124,11 @@ function Secrets({ project, env, setEnv, canWrite }) {
       )}
       {searching && (
         <div className="scroll-x"><table className="table"><thead><tr><th style={{ width: '34%' }}>Key</th><th>Location</th><th>Tags</th><th style={{ width: 150 }}>Updated</th></tr></thead><tbody>
-          {(found || []).map((r) => (
+          {(found || []).map((r: Row) => (
             <tr key={r.id} className="clickable" onClick={() => jump(r)}>
               <td><div className="c-main key">{r.key}</div>{r.comment && <div className="c-sub">{r.comment}</div>}</td>
               <td><div className="state-line"><EnvTag slug={r.env} /><span className="mono dim" style={{ fontSize: 12.5 }}>{r.path}</span></div></td>
-              <td>{(r.tags || []).map((t) => <span key={t} className="taglink">#{t}</span>)}</td>
+              <td>{(r.tags || []).map((t: any) => <span key={t} className="taglink">#{t}</span>)}</td>
               <td className="dim"><Rel iso={r.updated_at} /></td>
             </tr>))}
           {found && !found.length && <EmptyRow cols={4} icon="search" title="No matches" hint={`Nothing matches “${q}” in any environment you can access.`} />}
@@ -134,18 +136,18 @@ function Secrets({ project, env, setEnv, canWrite }) {
       )}
       {!searching && data && (
         <div className="scroll-x"><table className="table"><thead><tr><th style={{ width: '34%' }}>Key</th><th>Value</th><th style={{ width: 200 }}>Updated</th><th style={{ width: 56 }} /></tr></thead><tbody>
-          {path !== '/' && <tr className="folder clickable" onClick={() => setPath('/' + parts.slice(0, -1).join('/'))}><td colSpan="4"><div className="fname"><Icon name="folder" size={16} />..</div></td></tr>}
-          {folders.map((f) => (
-            <tr key={f} className="folder clickable" onClick={() => setPath(`${path === '/' ? '' : path}/${f}`)}><td colSpan="3"><div className="fname"><Icon name="folder" size={16} />{f}</div></td><td className="chev"><Icon name="right" size={15} /></td></tr>
+          {path !== '/' && <tr className="folder clickable" onClick={() => setPath('/' + parts.slice(0, -1).join('/'))}><td colSpan={4}><div className="fname"><Icon name="folder" size={16} />..</div></td></tr>}
+          {folders.map((f: string) => (
+            <tr key={f} className="folder clickable" onClick={() => setPath(`${path === '/' ? '' : path}/${f}`)}><td colSpan={3}><div className="fname"><Icon name="folder" size={16} />{f}</div></td><td className="chev"><Icon name="right" size={15} /></td></tr>
           ))}
-          {rows.map((s) => {
+          {rows.map((s: Row) => {
             const shown = revealed[s.id] !== undefined
             return (
               <tr key={s.id}>
                 <td>
                   <div className="c-main key">{s.key}{expiryBadge(s.expires_at)}</div>
                   {s.comment && <div className="c-sub">{s.comment}</div>}
-                  {(s.tags || []).length > 0 && <div className="c-tags">{s.tags.map((t) => <button key={t} className="taglink" onClick={() => setTag(t)}>#{t}</button>)}</div>}
+                  {(s.tags || []).length > 0 && <div className="c-tags">{s.tags.map((t: any) => <button key={t} className="taglink" onClick={() => setTag(t)}>#{t}</button>)}</div>}
                 </td>
                 <td>
                   <div className="vcell">
@@ -182,24 +184,24 @@ function Secrets({ project, env, setEnv, canWrite }) {
   )
 }
 
-function expiryBadge(iso) {
+function expiryBadge(iso: string) {
   if (!iso) return null
-  const ms = new Date(iso) - Date.now()
+  const ms = new Date(iso).getTime() - Date.now()
   if (ms <= 0) return <span className="exp bad" title={new Date(iso).toLocaleString()}>Expired</span>
   const days = Math.ceil(ms / 86400000)
   return <span className={`exp ${days <= 7 ? 'warn' : ''}`} title={new Date(iso).toLocaleString()}>{days <= 1 ? 'Expires today' : `Expires in ${days}d`}</span>
 }
 
-const toDateInput = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
+const toDateInput = (iso: string) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
 
-function SecretModal({ pid, env, path, initial, onClose, onSaved }) {
+function SecretModal({ pid, env, path, initial, onClose, onSaved }: { pid: string; env: string; path: string; initial: Row; onClose: (...args: any[]) => void; onSaved: (...args: any[]) => void }) {
   const isEdit = !!initial.id
-  const [f, setF] = useState({ key: initial.key, value: initial.value, comment: initial.comment || '', path: initial.path || path,
+  const [f, setF] = useState<Row>({ key: initial.key, value: initial.value, comment: initial.comment || '', path: initial.path || path,
     tags: (initial.tags || []).join(', '), expires: toDateInput(initial.expires_at) })
   const [err, setErr] = useState('')
-  const submit = async (e) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const body = { env, key: f.key, value: f.value, comment: f.comment, path: f.path, tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean) }
+    const body: Row = { env, key: f.key, value: f.value, comment: f.comment, path: f.path, tags: f.tags.split(",").map((t: string) => t.trim()).filter(Boolean) }
     if (f.expires) body.expires_at = new Date(`${f.expires}T23:59:59`).toISOString()
     else if (initial.expires_at) body.clear_expiry = true
     try { await api(`/projects/${pid}/secrets`, { method: 'PUT', body }); onSaved() } catch (x) { setErr(x.message) }
@@ -222,7 +224,7 @@ function SecretModal({ pid, env, path, initial, onClose, onSaved }) {
   )
 }
 
-function ImportModal({ pid, env, path, onClose, onDone }) {
+function ImportModal({ pid, env, path, onClose, onDone }: { pid: string; env: string; path: string; onClose: (...args: any[]) => void; onDone: (...args: any[]) => void }) {
   const [content, setContent] = useState('')
   const [err, setErr] = useState('')
   return (
@@ -236,8 +238,8 @@ function ImportModal({ pid, env, path, onClose, onDone }) {
   )
 }
 
-function History({ pid, secret, canWrite, onClose, onChanged }) {
-  const [rows, setRows] = useState([])
+function History({ pid, secret, canWrite, onClose, onChanged }: { pid: string; secret: Row; canWrite: boolean; onClose: (...args: any[]) => void; onChanged: (...args: any[]) => void }) {
+  const [rows, setRows] = useState<Row[]>([])
   const load = () => api(`/projects/${pid}/secrets/${secret.id}/versions`).then(setRows)
   useEffect(() => { load() }, [])
   return (
@@ -252,12 +254,12 @@ function History({ pid, secret, canWrite, onClose, onChanged }) {
   )
 }
 
-function Tokens({ project }) {
+function Tokens({ project }: { project: Row }) {
   const pid = project.id
-  const [list, setList] = useState([])
+  const [list, setList] = useState<Row[]>([])
   const [open, setOpen] = useState(false)
-  const [created, setCreated] = useState(null)
-  const [f, setF] = useState({ name: '', env: project.environments[0]?.slug, path: '/', can_write: false, expire_days: 90, ips: '' })
+  const [created, setCreated] = useState<string | null>(null)
+  const [f, setF] = useState<Row>({ name: '', env: project.environments[0]?.slug, path: '/', can_write: false, expire_days: 90, ips: '' })
   const [err, setErr] = useState('')
   const load = () => api(`/projects/${pid}/tokens`).then(setList)
   useEffect(() => { load() }, [])
@@ -283,7 +285,7 @@ function Tokens({ project }) {
           <form onSubmit={async (e) => { e.preventDefault(); try { const d = await api(`/projects/${pid}/tokens`, { method: 'POST', body: { name: f.name, env: f.env, path: f.path, can_write: f.can_write, expire_days: +f.expire_days, allowed_cidrs: f.ips.split(/[\s,]+/).filter(Boolean) } }); setOpen(false); setCreated(d.token); load() } catch (x) { setErr(x.message) } }}>
             {err && <div className="alert">{err}</div>}
             <div className="field"><label>Name</label><input className="input" required autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="github-actions" /></div>
-            <div className="field"><label>Environment</label><select className="input" value={f.env} onChange={(e) => setF({ ...f, env: e.target.value })}>{project.environments.map((e) => <option key={e.id} value={e.slug}>{e.name}</option>)}</select></div>
+            <div className="field"><label>Environment</label><select className="input" value={f.env} onChange={(e) => setF({ ...f, env: e.target.value })}>{project.environments.map((e: any) => <option key={e.id} value={e.slug}>{e.name}</option>)}</select></div>
             <div className="field"><label>Path prefix</label><input className="input mono" value={f.path} onChange={(e) => setF({ ...f, path: e.target.value })} /></div>
             <div className="field"><label>Allowed IPs<span className="hint">Optional — addresses or CIDR ranges, separated by commas</span></label><input className="input mono" value={f.ips} onChange={(e) => setF({ ...f, ips: e.target.value })} placeholder="203.0.113.7, 10.0.0.0/8" /></div>
             <div className="field"><label>Expires in (days, 0 = never)</label><input className="input" type="number" min="0" value={f.expire_days} onChange={(e) => setF({ ...f, expire_days: e.target.value })} /></div>
@@ -304,7 +306,7 @@ function Tokens({ project }) {
   )
 }
 
-function Settings({ project, reload, nav }) {
+function Settings({ project, reload, nav }: { project: Row; reload: (...args: any[]) => void; nav: (...args: any[]) => void }) {
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
   return (
@@ -312,7 +314,7 @@ function Settings({ project, reload, nav }) {
       <div className="sect" style={{ marginTop: 28 }}><h2>Environments</h2></div>
       {err && <div className="alert">{err}</div>}
       <table className="table"><thead><tr><th>Name</th><th>Slug</th><th /></tr></thead><tbody>
-        {project.environments.map((e) => (
+        {project.environments.map((e: Row) => (
           <tr key={e.id}><td style={{ fontWeight: 500 }}>{e.name}</td><td className="mono muted" style={{ fontSize: 13 }}>{e.slug}</td>
             <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={async () => { if (await ask(`Delete ${e.name} and all its secrets?`, { confirm: 'Delete', danger: true })) { try { await api(`/projects/${project.id}/environments/${e.id}`, { method: 'DELETE' }); reload() } catch (x) { setErr(x.message) } } }}>Delete</button></td></tr>))}
       </tbody></table>

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { api } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Avatar, Icon, Logo, Menu, ThemeToggle, currentTheme, flipTheme, hue } from './ui.jsx'
-import CommandPalette from './CommandPalette.jsx'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { Avatar, Icon, Logo, Menu, ThemeToggle, currentTheme, flipTheme, hue } from './ui'
+import CommandPalette from './CommandPalette'
+import type { Row } from '../types'
 
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 
@@ -11,10 +12,10 @@ export default function Shell() {
   const { user, orgs, orgId, org, switchOrg, logout } = useAuth()
   const nav = useNavigate()
   const { pathname } = useLocation()
-  const scroller = useRef(null)
+  const scroller = useRef<HTMLDivElement>(null)
   // every page opens at the top, like a fresh page load
   useEffect(() => { scroller.current?.scrollTo(0, 0) }, [pathname])
-  const [projects, setProjects] = useState([])
+  const [projects, setProjects] = useState<Row[]>([])
   const [palette, setPalette] = useState(false)
   const [theme, setTheme] = useState(currentTheme)
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('vaultly-sidebar') === 'collapsed' } catch { return false } })
@@ -32,12 +33,12 @@ export default function Shell() {
   }, [orgId])
 
   useEffect(() => {
-    const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o) } }
+    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o) } }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const link = ({ isActive }) => `navlink${isActive ? ' active' : ''}`
+  const link = ({ isActive }: { isActive: boolean }) => `navlink${isActive ? ' active' : ''}`
   return (
     <div className={`shell${collapsed ? ' collapsed' : ''}`}>
       <aside className="side">
@@ -80,8 +81,8 @@ export default function Shell() {
           <div className="side-foot">
             <Menu block left up trigger={
               <span className="profile">
-                <Avatar name={user.name} size={32} />
-                <span className="who"><b>{user.name}</b><span>{user.email}</span></span>
+                <Avatar name={user?.name} size={32} />
+                <span className="who"><b>{user?.name}</b><span>{user?.email}</span></span>
                 <Icon name="updown" size={14} />
               </span>
             } items={[
@@ -99,7 +100,7 @@ export default function Shell() {
           <div style={{ flex: 1 }} />
           <ThemeToggle />
           {admin && (
-            <Menu align="right" trigger={<span className="btn primary sm"><Icon name="plus" size={14} /> New</span>} items={[
+            <Menu trigger={<span className="btn primary sm"><Icon name="plus" size={14} /> New</span>} items={[
               { label: 'Project', icon: 'layers', run: () => nav('/app/projects?new=1') },
               { label: 'Invite member', icon: 'users', run: () => nav('/app/members?invite=1') },
             ]} />

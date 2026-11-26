@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { toast } from './feedback.jsx'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { toast } from './feedback'
 
-export function Logo({ size = 26 }) {
+export function Logo({ size = 26 }: { size?: number }) {
   return (
     <span className="logo">
       <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
@@ -14,7 +14,7 @@ export function Logo({ size = 26 }) {
   )
 }
 
-const PATHS = {
+const PATHS: Record<string, ReactNode> = {
   home: <path d="M4 11l8-7 8 7M6 10v10h12V10" />,
   layers: <><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /></>,
   users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5M16.5 4.7a3.5 3.5 0 010 6.6M18 14.8c2.2.5 3.5 2.2 3.5 5.2" /></>,
@@ -50,8 +50,8 @@ const PATHS = {
   moon: <path d="M20.5 13.2A8.5 8.5 0 1110.8 3.5a6.8 6.8 0 009.7 9.7z" />,
 }
 
-export function Icon({ name, size = 18, stroke = 1.7 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{PATHS[name]}</svg>
+export function Icon({ name, size = 18, stroke = 1.7 }: { name?: string; size?: number; stroke?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{name ? PATHS[name] : null}</svg>
 }
 
 // Freezes whatever scrolls behind a dialog while it is open (works when dialogs nest).
@@ -69,10 +69,10 @@ export function useScrollLock(active = true) {
   }, [active])
 }
 
-export function Modal({ title, onClose, children, wide }) {
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children?: ReactNode; wide?: boolean }) {
   useScrollLock()
   useEffect(() => {
-    const h = (e) => e.key === 'Escape' && onClose()
+    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [onClose])
@@ -86,7 +86,7 @@ export function Modal({ title, onClose, children, wide }) {
   )
 }
 
-export const copy = async (text, label = 'Copied') => {
+export const copy = async (text: string, label = 'Copied') => {
   try {
     await navigator.clipboard.writeText(text)
     toast.success(label)
@@ -97,7 +97,7 @@ export const copy = async (text, label = 'Copied') => {
   }
 }
 
-export const ago = (iso) => {
+export const ago = (iso?: string | null) => {
   if (!iso) return 'Never'
   const s = (Date.now() - new Date(iso).getTime()) / 1000
   if (s < 60) return 'Just now'
@@ -108,25 +108,27 @@ export const ago = (iso) => {
 }
 
 const HUES = [152, 200, 262, 24, 330, 48, 180, 12]
-export const hue = (str = '') => HUES[[...str].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length]
+export const hue = (str: string = '') => HUES[[...str].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length]
 
-export function Avatar({ name = '?', size = 26, square }) {
+export function Avatar({ name = '?', size = 26, square }: { name?: string; size?: number; square?: boolean }) {
   const h = hue(name)
   return (
-    <span className="av" style={{ width: size, height: size, fontSize: size * 0.42, borderRadius: square ? 7 : '50%', '--h': h }}>
+    <span className="av" style={{ width: size, height: size, fontSize: size * 0.42, borderRadius: square ? 7 : '50%', '--h': h } as CSSProperties}>
       {name.trim()[0]?.toUpperCase()}
     </span>
   )
 }
 
 // up / left open the menu above / to the right of its trigger; block makes the trigger fill its row.
-export function Menu({ items, trigger, up, left, block }) {
+export interface MenuItem { label: string; run: () => void; icon?: string; danger?: boolean; active?: boolean }
+
+export function Menu({ items, trigger, up, left, block }: { items: (MenuItem | false | null | undefined)[]; trigger?: ReactNode; up?: boolean; left?: boolean; block?: boolean }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
     window.addEventListener('click', close)
-    window.addEventListener('keydown', (e) => e.key === 'Escape' && close(), { once: true })
+    window.addEventListener('keydown', (e: KeyboardEvent) => e.key === 'Escape' && close(), { once: true })
     return () => window.removeEventListener('click', close)
   }, [open])
   return (
@@ -135,7 +137,7 @@ export function Menu({ items, trigger, up, left, block }) {
         : <button className="iconbtn" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setOpen(!open) }}><Icon name="dots" size={16} /></button>}
       {open && (
         <div className={`menu${up ? ' up' : ''}${left ? ' left' : ''}`} role="menu">
-          {items.filter(Boolean).map((it) => (
+          {items.filter((it): it is MenuItem => Boolean(it)).map((it) => (
             <button key={it.label} role="menuitem" className={it.danger ? 'danger' : ''} onClick={() => { setOpen(false); it.run() }}><Icon name={it.icon} size={15} />{it.label}{it.active && <Icon name="check" size={14} />}</button>
           ))}
         </div>
@@ -144,7 +146,7 @@ export function Menu({ items, trigger, up, left, block }) {
   )
 }
 
-export const shortName = (actor = '') => actor.startsWith('token:') ? actor : actor.split('@')[0]
+export const shortName = (actor: string = '') => actor.startsWith('token:') ? actor : actor.split('@')[0]
 
 export const currentTheme = () => (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark')
 

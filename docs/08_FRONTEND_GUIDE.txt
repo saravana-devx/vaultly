@@ -1,6 +1,6 @@
 08 - FRONTEND GUIDE  (frontend/)
 ================================
-React 18 + Vite. No UI library and no state library: plain CSS and React context.
+React 18 + TypeScript + Vite (npm run typecheck). No UI library and no state library: plain CSS and React context.
 
 BUILD AND SERVE
   Dev:  npm run dev (Vite on :5173, proxies /api to :8080)  - not used in the Docker setup
@@ -8,8 +8,8 @@ BUILD AND SERVE
         /api/ to the backend (nginx.conf). Unknown paths fall back to index.html (SPA routing).
 
 ENTRY AND ROUTING
-  src/main.jsx       BrowserRouter + AuthProvider + App
-  src/App.jsx        route table
+  src/main.tsx       BrowserRouter + AuthProvider + App
+  src/App.tsx        route table
      /                 Landing (public)             /login /register  AuthPages
      /invite/:token    Invite acceptance (public)
      /app              Shell (private) with children:
@@ -24,32 +24,32 @@ SESSION AND API ACCESS
     - api(path, opts) adds the Bearer token; on 401 it calls /auth/refresh (cookie) once,
       retries, and otherwise emits a "vaultly:logout" event.
     - apiBlob / apiForm for file download and upload (backup/restore).
-  src/auth.jsx
+  src/auth.tsx
     - AuthProvider: user, orgs, current orgId (remembered in localStorage), login/register/logout,
       reloadOrgs. On load it tries a silent refresh to restore the session.
 
 LAYOUT (src/components)
-  Shell.jsx           sidebar (workspace switcher, nav, project list, user) + sticky top bar
+  Shell.tsx           sidebar (workspace switcher, nav, project list, user) + sticky top bar
                       (search button, "+ New" menu) + <Outlet/>. Listens for Cmd/Ctrl+K and for the
                       "vaultly:projects" event to refresh the project list.
-  CommandPalette.jsx  Cmd/Ctrl+K: jump to pages/projects, run actions. Arrow keys + Enter.
-  ui.jsx              Logo, Icon (inline SVG set), Modal, Menu (popover), Avatar, toast hook,
+  CommandPalette.tsx  Cmd/Ctrl+K: jump to pages/projects, run actions. Arrow keys + Enter.
+  ui.tsx              Logo, Icon (inline SVG set), Modal, Menu (popover), Avatar, toast hook,
                       copy(), ago() relative time, hue() colour per name.
 
 PAGES (src/pages)
-  Landing.jsx         marketing page with product preview, features, security, FAQ
-  AuthPages.jsx       split-screen login / signup, password strength meter, show/hide
-  Dashboard.jsx       KPI cards (+sparkline), activity chart with 7d/14d toggle, projects table,
+  Landing.tsx         marketing page with product preview, features, security, FAQ
+  AuthPages.tsx       split-screen login / signup, password strength meter, show/hide
+  Dashoard.tsx       KPI cards (+sparkline), activity chart with 7d/14d toggle, projects table,
                       "Needs attention" (expiring tokens/secrets), recent activity, onboarding
-  Projects.jsx        project table + create modal
-  Project.jsx         tabs: Secrets | Service tokens | Dynamic | Integrations | Webhooks | Settings
+  Projects.tsx        project table + create modal
+  Project.tsx         tabs: Secrets | Service tokens | Dynamic | Integrations | Webhooks | Settings
                       Secrets: environment switcher, folders, tag filter, global search,
                       reveal/copy/edit/history/rotate/delete, import/export, expiry badges
-  project/*.jsx       Integrations, Webhooks, Dynamic (one file per tab)
-  Members.jsx         members, roles, per-environment access, invitations
-  Audit.jsx           filterable audit table with "load more"
-  Settings.jsx        personal tokens, backup and restore
-  Invite.jsx          accept-an-invitation page
+  project/*.tsx       Integrations, Webhooks, Dynamic (one file per tab)
+  Memers.tsx         members, roles, per-environment access, invitations
+  Audit.tsx           filterable audit table with "load more"
+  Settings.tsx        personal tokens, backup and restore
+  Invite.tsx          accept-an-invitation page
 
 DESIGN SYSTEM (src/styles.css)
   One file, three layers:
@@ -74,7 +74,7 @@ LIGHT AND DARK THEME
 --------------------
   public/theme-init.js runs before the app renders and sets <html data-theme="light|dark"> from the saved
   choice (localStorage "vaultly-theme") or, if none, the operating system setting. The sun/moon button
-  (ThemeToggle in components/ui.jsx; landing nav and app top bar) flips it and saves the choice.
+  (ThemeToggle in components/ui.tsx; landing nav and app top bar) flips it and saves the choice.
   Dark colours are the default variables in styles.css; the light theme is one block at the end of the file
   that overrides them. Palette: Emptiness #FBFCFC (panels), City Lights #E0E5E9 (canvas, borders), Light Teal
   #B2C9C5 (stronger borders, scrollbars), Retro Lime #1BD488 (buttons, highlights, active nav), Wish Upon a Star
@@ -91,7 +91,7 @@ SCROLLING
 
 SIDEBAR
 -------
-components/Shell.jsx. Top: logo and a collapse button (icons-only mode, remembered in localStorage "vaultly-sidebar").
+components/Shell.tsx. Top: logo and a collapse button (icons-only mode, remembered in localStorage "vaultly-sidebar").
 Workspace switcher (a Menu: avatar, name, role; pick another workspace). Groups: General (Overview, Projects, Members,
 Audit log), Projects (every project with a colour dot and a + for admins), Support (Documentation, Settings). Bottom: a
 profile card that opens a menu (Settings, light/dark mode, Sign out). Below 960 px it becomes a top strip.

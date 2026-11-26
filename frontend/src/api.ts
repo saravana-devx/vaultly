@@ -1,15 +1,22 @@
-import { toast } from './components/feedback.jsx'
+import { toast } from './components/feedback'
 
 // Every JSON response is { success, message, data }. api() returns `data`, and shows the
 // server's message as a toast after a successful write (pass quiet: true to opt out).
 // Access token lives in memory only; the refresh token is an httpOnly cookie.
-let accessToken = null
-let refreshing = null
+let accessToken: string | null = null
+let refreshing: Promise<any> | null = null
 
-export const setToken = (t) => { accessToken = t }
+export interface ApiOptions {
+  method?: string
+  body?: unknown
+  auth?: boolean
+  quiet?: boolean
+}
 
-async function raw(path, { method = 'GET', body, auth = true } = {}) {
-  const headers = {}
+export const setToken = (t: string | null) => { accessToken = t }
+
+async function raw(path: string, { method = 'GET', body, auth = true }: ApiOptions = {}) {
+  const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (auth && accessToken) headers.Authorization = `Bearer ${accessToken}`
   return fetch(`/api${path}`, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) })
@@ -17,7 +24,7 @@ async function raw(path, { method = 'GET', body, auth = true } = {}) {
 
 export async function refreshSession() {
   refreshing ||= raw('/auth/refresh', { method: 'POST', auth: false })
-    .then(async (r) => {
+    .then(async (r): Promise<any> => {
       if (!r.ok) return null
       const d = (await r.json()).data
       accessToken = d.access_token
@@ -28,10 +35,11 @@ export async function refreshSession() {
 }
 
 export class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status }
+  status: number
+  constructor(status: number, message: string) { super(message); this.status = status }
 }
 
-export async function api(path, opts = {}) {
+export async function api(path: string, opts: ApiOptions = {}): Promise<any> {
   let r = await raw(path, opts)
   if (r.status === 401 && opts.auth !== false) {
     if (await refreshSession()) r = await raw(path, opts)
@@ -51,12 +59,12 @@ export async function api(path, opts = {}) {
 }
 
 export const authApi = {
-  login: async (email, password) => {
+  login: async (email: string, password: string) => {
     const d = await api('/auth/login', { method: 'POST', body: { email, password }, auth: false, quiet: true })
     accessToken = d.access_token
     return d.user
   },
-  register: async (body) => {
+  register: async (body: unknown) => {
     const d = await api('/auth/register', { method: 'POST', body, auth: false, quiet: true })
     accessToken = d.access_token
     return d.user
@@ -64,20 +72,20 @@ export const authApi = {
   logout: async () => { await api('/auth/logout', { method: 'POST', auth: false, quiet: true }).catch(() => {}); accessToken = null },
 }
 
-async function authed(path, init) {
-  const go = () => fetch(`/api${path}`, { ...init, credentials: 'same-origin', headers: { ...(init.headers || {}), ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
+async function authed(path: string, init: RequestInit) {
+  const go = () => fetch(`/api${path}`, { ...init, credentials: 'same-origin', headers: { ...((init.headers as Record<string, string>) || {}), ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
   let r = await go()
   if (r.status === 401 && (await refreshSession())) r = await go()
   return r
 }
 
-export async function apiBlob(path, body) {
+export async function apiBlob(path: string, body: unknown) {
   const r = await authed(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!r.ok) throw new ApiError(r.status, (await r.json().catch(() => ({}))).message || 'Something went wrong')
   return r.blob()
 }
 
-export async function apiForm(path, form) {
+export async function apiForm(path: string, form: FormData) {
   const r = await authed(path, { method: 'POST', body: form })
   const d = await r.json().catch(() => ({}))
   if (!r.ok) throw new ApiError(r.status, d.message || 'Something went wrong')

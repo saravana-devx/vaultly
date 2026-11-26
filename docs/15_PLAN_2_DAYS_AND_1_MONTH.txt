@@ -98,7 +98,7 @@ DAY 1 (~7 h): understand it, prove it works, get CI green
   5. [30 min] "Change it live" drills - DO NOT COMMIT, just practise (interviewers like this):
        a. Lower the login limit to 5/min (internal/routes/auth.go, the m.Limit("login", ...) line); rebuild; see the 429
        b. Make new projects start with only dev + prod (internal/project/model.go defaultEnvs)
-       c. Add a label for a new audit action in frontend/src/pages/Dashboard.jsx (the VERB map)
+       c. Add a label for a new audit action in frontend/src/pages/Dashboard.tsx (the VERB map)
        d. Shorten the access-token life to 5 minutes (internal/auth/auth.go AccessTTL)
      For each: find the line, change it, rebuild (docker compose up -d --build backend|frontend),
      see the effect, then `git checkout .` to undo.

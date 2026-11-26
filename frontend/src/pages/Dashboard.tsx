@@ -1,11 +1,13 @@
+import type { FormEvent } from 'react'
+import type { Row } from '../types'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Avatar, Icon, ago, shortName } from '../components/ui.jsx'
-import { EnvTag } from '../components/table.jsx'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { Avatar, Icon, ago, shortName } from '../components/ui'
+import { EnvTag } from '../components/table'
 
-const VERB = {
+const VERB: Record<string, string> = {
   'secret.create': 'created', 'secret.update': 'updated', 'secret.read': 'revealed', 'secret.delete': 'deleted', 'secret.rotate': 'rotated',
   'secret.rollback': 'restored', 'secret.fetch': 'fetched secrets at', 'secret.export': 'exported', 'secret.import': 'imported into', 'secret.expired': 'expired:',
   'token.create': 'created token', 'token.revoke': 'revoked token', 'token.denied': 'was blocked by IP allowlist:',
@@ -29,7 +31,7 @@ function kindOf(action = '') {
   return ['Admin', 'plain']
 }
 
-function Stat({ icon, label, caption, value, pill, foot, to }) {
+function Stat({ icon, label, caption, value, pill, foot, to }: { icon?: string; label: string; caption?: string; value: any; pill?: any; foot?: string; to?: string }) {
   const body = (
     <>
       <div className="dstat-top"><span><i className="tile"><Icon name={icon} size={16} /></i>{label}</span>{caption && <small>{caption}</small>}</div>
@@ -40,17 +42,17 @@ function Stat({ icon, label, caption, value, pill, foot, to }) {
   return to ? <Link className="dstat" to={to}>{body}</Link> : <div className="dstat">{body}</div>
 }
 
-function Chart({ data }) {
-  const max = Math.max(1, ...data.map((d) => d.count))
+function Chart({ data }: { data: Row }) {
+  const max = Math.max(1, ...data.map((d: Row) => d.count))
   const top = max <= 4 ? 4 : Math.ceil(max / 4) * 4
-  const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const fmt = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   return (
     <div className="chart2">
       <div className="yaxis">{[top, top / 2, 0].map((v) => <span key={v}>{v}</span>)}</div>
       <div className="plot">
         <i className="gl" style={{ top: 0 }} /><i className="gl" style={{ top: '50%' }} /><i className="gl" style={{ bottom: 0 }} />
         <div className="bars">
-          {data.map((d, i) => (
+          {data.map((d: Row, i: number) => (
             <div className="col" key={d.day}>
               <span className="tip"><b>{d.count}</b> events · {fmt(d.day)}</span>
               <i className={i === data.length - 1 ? 'now' : ''} style={{ height: `${(d.count / top) * 100}%` }} />
@@ -65,8 +67,8 @@ function Chart({ data }) {
 
 export default function Dashboard() {
   const { org, orgId, user } = useAuth()
-  const [stats, setStats] = useState(null)
-  const [projects, setProjects] = useState(null)
+  const [stats, setStats] = useState<Row | null>(null)
+  const [projects, setProjects] = useState<Row | null>(null)
   const [range, setRange] = useState(14)
   const [allAttn, setAllAttn] = useState(false)
   const admin = org?.role === 'admin'
@@ -77,30 +79,30 @@ export default function Dashboard() {
   }, [orgId])
 
   const attention = useMemo(() => {
-    const urgency = (a) => (/expired/i.test(a.reason) ? -1 : Number(a.reason.match(/\d+/)?.[0] ?? 999))
+    const urgency = (a: Row) => (/expired/i.test(a.reason) ? -1 : Number(a.reason.match(/\d+/)?.[0] ?? 999))
     return [...(stats?.attention || [])].sort((a, b) => urgency(a) - urgency(b))
   }, [stats])
   const series = stats ? stats.activity.slice(-range) : null
-  const total = series?.reduce((a, d) => a + d.count, 0)
-  const maxSecrets = Math.max(1, ...(projects || []).map((p) => p.secret_count))
+  const total = series?.reduce((a: any, d: any) => a + d.count, 0)
+  const maxSecrets = Math.max(1, ...(projects || []).map((p: Row) => p.secret_count))
   const expiringTokens = attention.filter((a) => a.kind === 'token').length
   const onboarding = stats && (stats.projects === 0 || stats.secrets === 0 || stats.tokens === 0)
   const first = projects?.[0] ? `/app/projects/${projects[0].id}` : '/app/projects'
-  const steps = onboarding && [
+  const steps = onboarding && ([
     ['Create a project', 'Each project gets its own encryption key.', stats.projects > 0, '/app/projects?new=1'],
     ['Add your first secrets', 'One by one, or import a .env file.', stats.secrets > 0, first],
     ['Create a service token', 'Lets CI or your app fetch secrets without a login.', stats.tokens > 0, first],
-  ]
+  ] as [string, string, boolean, string][])
   const shownAttn = allAttn ? attention : attention.slice(0, 4)
 
-  const envCount = (projects || []).reduce((n, p) => n + p.environments.length, 0)
+  const envCount = (projects || []).reduce((n: any, p: any) => n + p.environments.length, 0)
   const perProject = stats && stats.projects ? Math.round(stats.secrets / stats.projects) : 0
   const hello = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'
 
   return (
     <>
       <div className="head">
-        <div><h1>{hello}, {shortName(user.name)}</h1><p>Here is what is happening in {org?.name}.</p></div>
+        <div><h1>{hello}, {shortName(user?.name)}</h1><p>Here is what is happening in {org?.name}.</p></div>
       </div>
 
       <section className="hero">
@@ -136,7 +138,7 @@ export default function Dashboard() {
             <div className="dsm">
               <div className="dsm-top"><i className="tile dark"><Icon name="log" size={16} /></i>Events · 24h</div>
               <div className="dsm-v">{stats?.events_24h ?? '–'}</div>
-              <div className="dsm-f">{stats ? `${stats.activity.reduce((a, d) => a + d.count, 0).toLocaleString()} in the last 14 days` : ' '}</div>
+              <div className="dsm-f">{stats ? `${stats.activity.reduce((a: any, d: any) => a + d.count, 0).toLocaleString()} in the last 14 days` : ' '}</div>
             </div>
             <div className="dsm">
               <div className="dsm-top"><i className={`tile ${attention.length ? 'warn' : ''}`}><Icon name={attention.length ? 'alert' : 'check'} size={16} /></i>Needs attention</div>
@@ -159,7 +161,7 @@ export default function Dashboard() {
             <div className="dcard-h"><div className="dtitle"><i className="tile"><Icon name="log" size={16} /></i>Recent activity</div><Link to="/app/audit" className="link">View log</Link></div>
             <div className="atab">
               <div className="ar-h"><span>Event</span><span>Project</span><span>Type</span><span>When</span></div>
-              {stats.recent.slice(0, 6).map((e, i) => {
+              {stats.recent.slice(0, 6).map((e: Row, i: number) => {
                 const [kind, tone] = kindOf(e.action)
                 return (
                   <div key={i} className="ar">
@@ -175,7 +177,7 @@ export default function Dashboard() {
           </section>
         ) : (
           <section className="dcard" style={{ marginBottom: 0 }}><div className="dcard-h"><div className="dtitle"><i className="tile"><Icon name="shield" size={16} /></i>Your access</div></div>
-            <div className="panel-b muted" style={{ fontSize: 13.5, paddingTop: 0 }}>You’re {org?.role === 'admin' ? 'an' : 'a'} <b style={{ color: 'var(--ink)' }}>{org?.role}</b> in {org?.name}. Signed in as {user.email}.</div></section>
+            <div className="panel-b muted" style={{ fontSize: 13.5, paddingTop: 0 }}>You’re {org?.role === 'admin' ? 'an' : 'a'} <b style={{ color: 'var(--ink)' }}>{org?.role}</b> in {org?.name}. Signed in as {user?.email}.</div></section>
         )}
 
         {admin && stats?.attention && (
@@ -201,10 +203,10 @@ export default function Dashboard() {
         {projects && projects.length === 0 ? <div className="empty-in"><h3>No projects yet</h3><p>Projects hold your secrets, grouped by environment.</p></div> : (
           <div className="prow-wrap">
             <div className="prow hd"><span>Name</span><span>Environments</span><span>Secrets</span><span>Last activity</span></div>
-            {(projects || []).slice(0, 6).map((p) => (
+            {(projects || []).slice(0, 6).map((p: Row) => (
               <Link to={`/app/projects/${p.id}`} key={p.id} className="prow">
                 <span className="nm"><Avatar name={p.name} square size={28} /><span>{p.name}</span></span>
-                <span className="chips">{p.environments.slice(0, 3).map((e) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
+                <span className="chips">{p.environments.slice(0, 3).map((e: any) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
                 <span className="sc"><b>{p.secret_count}</b><u><i style={{ width: `${(p.secret_count / maxSecrets) * 100}%` }} /></u></span>
                 <span className="muted">{p.last_activity ? ago(p.last_activity) : '—'}</span>
               </Link>))}

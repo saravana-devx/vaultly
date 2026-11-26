@@ -1,24 +1,26 @@
+import type { FormEvent } from 'react'
+import type { Row } from '../../types'
 import { useEffect, useState } from 'react'
-import { api } from '../../api.js'
-import { Icon, Menu, Modal, copy } from '../../components/ui.jsx'
-import { ask, toast } from '../../components/feedback.jsx'
-import { EmptyRow, Rel, RowMenu, StateDot, TableFoot, plural } from '../../components/table.jsx'
+import { api } from '../../api'
+import { Icon, Menu, Modal, copy } from '../../components/ui'
+import { ask, toast } from '../../components/feedback'
+import { EmptyRow, Rel, RowMenu, StateDot, TableFoot, plural } from '../../components/table'
 
 const EVENT_GROUPS = [
   ['*', 'Everything'], ['secret.*', 'Secret changes and reads'], ['secret.expired', 'Secret expired'], ['token.*', 'Service token events'],
   ['dynamic.*', 'Dynamic credentials'], ['integration.*', 'Integration syncs'], ['webhook.*', 'Webhook changes'],
 ]
 
-export default function Webhooks({ project }) {
+export default function Webhooks({ project }: { project: Row }) {
   const pid = project.id
-  const [list, setList] = useState(null)
+  const [list, setList] = useState<Row | null>(null)
   const [open, setOpen] = useState(false)
-  const [created, setCreated] = useState(null)
-  const [deliveries, setDeliveries] = useState(null)
+  const [created, setCreated] = useState<string | null>(null)
+  const [deliveries, setDeliveries] = useState<Row | null>(null)
   const load = () => api(`/projects/${pid}/webhooks`).then(setList)
   useEffect(() => { load() }, [pid])
 
-  const test = async (w) => {
+  const test = async (w: Row) => {
     const r = await api(`/projects/${pid}/webhooks/${w.id}/test`, { method: 'POST', quiet: true })
     toast(r.error ? `Failed: ${r.error}` : `Delivered in ${r.duration_ms} ms (HTTP ${r.status})`); load()
   }
@@ -29,7 +31,7 @@ export default function Webhooks({ project }) {
         <button className="btn primary" onClick={() => setOpen(true)}><Icon name="plus" size={15} /> Add webhook</button>
       </div>
       <div className="scroll-x"><table className="table"><thead><tr><th>Webhook</th><th>Events</th><th>Status</th><th>Last delivery</th><th style={{ width: 56 }} /></tr></thead><tbody>
-        {(list || []).map((w) => (
+        {(list || []).map((w: Row) => (
           <tr key={w.id}>
             <td style={{ opacity: w.active ? 1 : 0.6 }}><div className="c-main">{w.name}</div><div className="c-sub mono clip">{w.url}</div></td>
             <td className="mono dim" style={{ fontSize: 12 }}>{w.events.join(', ')}</td>
@@ -61,11 +63,11 @@ export default function Webhooks({ project }) {
   )
 }
 
-function AddWebhook({ pid, onClose, onDone }) {
-  const [f, setF] = useState({ name: '', url: '' })
-  const [events, setEvents] = useState(['*'])
+function AddWebhook({ pid, onClose, onDone }: { pid: string; onClose: (...args: any[]) => void; onDone: (...args: any[]) => void }) {
+  const [f, setF] = useState<Row>({ name: '', url: '' })
+  const [events, setEvents] = useState<string[]>(['*'])
   const [err, setErr] = useState('')
-  const toggle = (e) => setEvents((cur) => (e === '*' ? ['*'] : cur.includes(e) ? cur.filter((x) => x !== e) : [...cur.filter((x) => x !== '*'), e]))
+  const toggle = (e: any) => setEvents((cur) => (e === '*' ? ['*'] : cur.includes(e) ? cur.filter((x) => x !== e) : [...cur.filter((x) => x !== '*'), e]))
   return (
     <Modal title="Add webhook" onClose={onClose}>
       <form onSubmit={async (e) => { e.preventDefault(); try { const r = await api(`/projects/${pid}/webhooks`, { method: 'POST', body: { ...f, events: events.length ? events : ['*'] } }); onDone(r.secret) } catch (x) { setErr(x.message) } }}>
@@ -80,17 +82,17 @@ function AddWebhook({ pid, onClose, onDone }) {
   )
 }
 
-function Deliveries({ pid, hook, onClose }) {
-  const [rows, setRows] = useState(null)
+function Deliveries({ pid, hook, onClose }: { pid: string; hook: Row; onClose: (...args: any[]) => void }) {
+  const [rows, setRows] = useState<Row | null>(null)
   useEffect(() => { api(`/projects/${pid}/webhooks/${hook.id}/deliveries`).then(setRows) }, [])
   return (
     <Modal title={`Deliveries · ${hook.name}`} onClose={onClose} wide>
       <table className="table"><thead><tr><th>Event</th><th>Result</th><th>Tries</th><th>Time</th><th>When</th></tr></thead><tbody>
-        {(rows || []).map((d, i) => (
+        {(rows || []).map((d: Row, i: number) => (
           <tr key={i}><td className="mono" style={{ fontSize: 12.5 }}>{d.action}</td>
             <td><StateDot tone={d.error ? 'bad' : 'ok'}>{d.status || 'No response'}</StateDot>{d.error && <div className="c-sub err">{d.error}</div>}</td>
             <td className="dim">{d.attempts}</td><td className="dim">{d.duration_ms} ms</td><td className="dim"><Rel iso={d.at} /></td></tr>))}
-        {rows && !rows.length && <tr><td colSpan="5" className="muted" style={{ textAlign: 'center', padding: 32 }}>Nothing sent yet.</td></tr>}
+        {rows && !rows.length && <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 32 }}>Nothing sent yet.</td></tr>}
       </tbody></table>
       <div className="modal-actions"><button className="btn" onClick={onClose}>Close</button></div>
     </Modal>

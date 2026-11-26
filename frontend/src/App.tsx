@@ -1,28 +1,29 @@
+import type { ReactElement } from 'react'
 import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
-import { useAuth } from './auth.jsx'
-import Landing from './pages/Landing.jsx'
-import { Login, Register } from './pages/AuthPages.jsx'
-import Shell from './components/Shell.jsx'
-import Dashboard from './pages/Dashboard.jsx'
-import Projects from './pages/Projects.jsx'
-import Project from './pages/Project.jsx'
-import Members from './pages/Members.jsx'
-import Audit from './pages/Audit.jsx'
-import Settings from './pages/Settings.jsx'
-import Invite from './pages/Invite.jsx'
-import Docs from './pages/Docs.jsx'
-import { ConfirmHost, Toaster } from './components/feedback.jsx'
+import { useAuth } from './auth'
+import Landing from './pages/Landing'
+import { Login, Register } from './pages/AuthPages'
+import Shell from './components/Shell'
+import Dashboard from './pages/Dashboard'
+import Projects from './pages/Projects'
+import Project from './pages/Project'
+import Members from './pages/Members'
+import Audit from './pages/Audit'
+import Settings from './pages/Settings'
+import Invite from './pages/Invite'
+import Docs from './pages/Docs'
+import { ConfirmHost, Toaster } from './components/feedback'
 
-function Private({ children }) {
+function Private({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth()
   if (loading) return <div className="splash"><div className="spinner" /></div>
   return user ? children : <Navigate to="/login" replace />
 }
 
-function Public({ children }) {
+function Public({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth()
-  if (loading) return <div className="splash"><div className="spinner" /></div>
   const [params] = useSearchParams()
+  if (loading) return <div className="splash"><div className="spinner" /></div>
   const next = params.get('next')
   return user ? <Navigate to={next && next.startsWith('/') && !next.startsWith('//') ? next : '/app'} replace /> : children
 }

@@ -1,13 +1,14 @@
+import type { Row } from '../types'
 import { useEffect, useState } from 'react'
-import { api } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Avatar, Icon, shortName } from '../components/ui.jsx'
-import { describeEvent } from '../lib/events.js'
-import { EmptyRow, Rel, StateDot, TableFoot, plural } from '../components/table.jsx'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { Avatar, Icon, shortName } from '../components/ui'
+import { describeEvent } from '../lib/events'
+import { EmptyRow, Rel, StateDot, TableFoot, plural } from '../components/table'
 
 export default function Audit() {
   const { orgId } = useAuth()
-  const [events, setEvents] = useState([])
+  const [events, setEvents] = useState<Row[]>([])
   const [next, setNext] = useState('')
   const [err, setErr] = useState('')
   const [kind, setKind] = useState('')

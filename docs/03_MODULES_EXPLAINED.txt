@@ -120,8 +120,8 @@ openbao/bootstrap.sh   sidecar loop: init once, unseal after restarts, enable Tr
 
 FRONTEND  (frontend/src)  - see 08_FRONTEND_GUIDE.txt for detail
 --------------------------------------------------------------
-main.jsx, App.jsx        bootstrap + routes          api.js     fetch wrapper + token refresh
-auth.jsx                 session/workspace context   styles.css the whole design system
+main.tsx, App.tsx        bootstrap + routes          api.js     fetch wrapper + token refresh
+auth.tsx                 session/workspace context   styles.css the whole design system
 components/              Shell (sidebar+topbar), CommandPalette, ui (icons, modal, menu)
 pages/                   Landing, AuthPages, Dashboard, Projects, Project (+ project/*),
                          Members, Audit, Settings, Invite

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Logo, ThemeToggle } from '../components/ui.jsx'
+import { Logo, ThemeToggle } from '../components/ui'
 
 function Preview() {
-  const rows = [['DATABASE_URL', 'postgres://app:s3cr3t@10.0.4.12/app', true, 'v4', '2 hr ago'], ['STRIPE_SECRET_KEY', '', false, 'v2', '3 d ago'], ['SENDGRID_API_KEY', '', false, 'v1', '3 d ago'], ['JWT_SIGNING_KEY', '', false, 'v7', '12 d ago'], ['REDIS_URL', '', false, 'v1', '12 d ago']]
+  const rows: [string, string, boolean, string, string][] = [['DATABASE_URL', 'postgres://app:s3cr3t@10.0.4.12/app', true, 'v4', '2 hr ago'], ['STRIPE_SECRET_KEY', '', false, 'v2', '3 d ago'], ['SENDGRID_API_KEY', '', false, 'v1', '3 d ago'], ['JWT_SIGNING_KEY', '', false, 'v7', '12 d ago'], ['REDIS_URL', '', false, 'v1', '12 d ago']]
   return (
     <div className="pv" aria-hidden="true">
       <div className="pv-side">
@@ -23,7 +23,7 @@ function Preview() {
   )
 }
 
-export default function Landing({ signedIn }) {
+export default function Landing({ signedIn }: { signedIn?: boolean }) {
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 8)

@@ -1,26 +1,28 @@
+import type { FormEvent } from 'react'
+import type { Row } from '../../types'
 import { useEffect, useState } from 'react'
-import { api } from '../../api.js'
-import { Icon, Menu, Modal, ago, copy } from '../../components/ui.jsx'
-import { ask, toast } from '../../components/feedback.jsx'
-import { EmptyRow, EnvTag, Rel, RowMenu, StateDot, TableFoot, plural } from '../../components/table.jsx'
+import { api } from '../../api'
+import { Icon, Menu, Modal, ago, copy } from '../../components/ui'
+import { ask, toast } from '../../components/feedback'
+import { EmptyRow, EnvTag, Rel, RowMenu, StateDot, TableFoot, plural } from '../../components/table'
 
-const fmtTTL = (s) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`)
-const left = (iso) => {
-  const s = Math.floor((new Date(iso) - Date.now()) / 1000)
+const fmtTTL = (s: number) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`)
+const left = (iso: string) => {
+  const s = Math.floor((new Date(iso).getTime() - Date.now()) / 1000)
   if (s <= 0) return 'expired'
   return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m left` : s >= 60 ? `${Math.floor(s / 60)}m left` : `${s}s left`
 }
 
-export default function Dynamic({ project }) {
+export default function Dynamic({ project }: { project: Row }) {
   const pid = project.id
-  const [list, setList] = useState(null)
+  const [list, setList] = useState<Row | null>(null)
   const [open, setOpen] = useState(false)
-  const [lease, setLease] = useState(null)
-  const [leases, setLeases] = useState(null)
+  const [lease, setLease] = useState<Row | null>(null)
+  const [leases, setLeases] = useState<Row | null>(null)
   const load = () => api(`/projects/${pid}/dynamic`).then(setList)
   useEffect(() => { load() }, [pid])
 
-  const generate = async (d) => {
+  const generate = async (d: Row) => {
     try { setLease({ cfg: d, ...(await api(`/projects/${pid}/dynamic/${d.id}/lease`, { method: 'POST', body: {}, quiet: true })) }); load() } catch (e) { toast(e.message) }
   }
   return (
@@ -30,7 +32,7 @@ export default function Dynamic({ project }) {
         <button className="btn primary" onClick={() => setOpen(true)}><Icon name="plus" size={15} /> New dynamic secret</button>
       </div>
       <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Environment</th><th>Target</th><th>Lifetime</th><th>Active</th><th style={{ width: 230 }} /></tr></thead><tbody>
-        {(list || []).map((d) => (
+        {(list || []).map((d: Row) => (
           <tr key={d.id}>
             <td><div className="c-main">{d.name}</div><div className="c-sub">PostgreSQL</div></td>
             <td><EnvTag slug={d.env} /></td>
@@ -47,7 +49,7 @@ export default function Dynamic({ project }) {
           </tr>))}
         {list && !list.length && <EmptyRow cols={6} icon="key2" title="No dynamic secrets yet" hint="Create one to hand out short-lived database credentials." />}
       </tbody></table><TableFoot>{plural((list || []).length, 'dynamic secret')}</TableFoot></div>
-      {list?.length > 0 && <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>From CI or an app, use a service token: <span className="mono">POST /api/v1/dynamic/{list[0].name}/lease</span></p>}
+      {list && list.length > 0 && <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>From CI or an app, use a service token: <span className="mono">POST /api/v1/dynamic/{list[0].name}/lease</span></p>}
       {open && <AddDynamic project={project} onClose={() => setOpen(false)} onDone={() => { setOpen(false); load() }} />}
       {lease && (
         <Modal title="Credentials generated" onClose={() => setLease(null)}>
@@ -63,20 +65,20 @@ export default function Dynamic({ project }) {
   )
 }
 
-function AddDynamic({ project, onClose, onDone }) {
-  const [f, setF] = useState({ name: '', env: project.environments[0]?.slug, admin_url: '', grants: 'GRANT pg_read_all_data TO {{name}}', ttl: 60, max: 1440 })
+function AddDynamic({ project, onClose, onDone }: { project: Row; onClose: (...args: any[]) => void; onDone: (...args: any[]) => void }) {
+  const [f, setF] = useState<Row>({ name: '', env: project.environments[0]?.slug, admin_url: '', grants: 'GRANT pg_read_all_data TO {{name}}', ttl: 60, max: 1440 })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   return (
     <Modal title="New dynamic secret" onClose={onClose}>
       <form onSubmit={async (e) => {
         e.preventDefault(); setBusy(true); setErr('')
-        try { await api(`/projects/${project.id}/dynamic`, { method: 'POST', body: { name: f.name, env: f.env, admin_url: f.admin_url, grants: f.grants.split('\n').map((x) => x.trim()).filter(Boolean), default_ttl_s: f.ttl * 60, max_ttl_s: f.max * 60 } }); onDone() } catch (x) { setErr(x.message); setBusy(false) }
+        try { await api(`/projects/${project.id}/dynamic`, { method: 'POST', body: { name: f.name, env: f.env, admin_url: f.admin_url, grants: f.grants.split('\n').map((x: string) => x.trim()).filter(Boolean), default_ttl_s: f.ttl * 60, max_ttl_s: f.max * 60 } }); onDone() } catch (x) { setErr(x.message); setBusy(false) }
       }}>
         {err && <div className="alert">{err}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="field"><label>Name</label><input className="input" required autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="readonly-db" /></div>
-          <div className="field"><label>Environment</label><select className="input" value={f.env} onChange={(e) => setF({ ...f, env: e.target.value })}>{project.environments.map((e) => <option key={e.id} value={e.slug}>{e.name}</option>)}</select></div>
+          <div className="field"><label>Environment</label><select className="input" value={f.env} onChange={(e) => setF({ ...f, env: e.target.value })}>{project.environments.map((e: any) => <option key={e.id} value={e.slug}>{e.name}</option>)}</select></div>
         </div>
         <div className="field"><label>Admin connection URL<span className="hint">Needs CREATEROLE — stored encrypted</span></label><input className="input mono" type="password" required autoComplete="off" value={f.admin_url} onChange={(e) => setF({ ...f, admin_url: e.target.value })} placeholder="postgres://admin:password@db.internal:5432/app" /></div>
         <div className="field"><label>Grants<span className="hint">One SQL statement per line. {'{{name}}'} is the new role.</span></label><textarea className="input" style={{ minHeight: 80 }} value={f.grants} onChange={(e) => setF({ ...f, grants: e.target.value })} spellCheck={false} /></div>
@@ -90,19 +92,19 @@ function AddDynamic({ project, onClose, onDone }) {
   )
 }
 
-function Leases({ pid, cfg, onClose }) {
-  const [rows, setRows] = useState(null)
+function Leases({ pid, cfg, onClose }: { pid: string; cfg: Row; onClose: (...args: any[]) => void }) {
+  const [rows, setRows] = useState<Row | null>(null)
   const load = () => api(`/projects/${pid}/dynamic/${cfg.id}/leases`).then(setRows)
   useEffect(() => { load() }, [])
   return (
     <Modal title={`Leases · ${cfg.name}`} onClose={onClose} wide>
       <table className="table"><thead><tr><th>Role</th><th>State</th><th>Created by</th><th>Expires</th><th /></tr></thead><tbody>
-        {(rows || []).map((l) => (
+        {(rows || []).map((l: Row) => (
           <tr key={l.id}><td className="mono" style={{ fontSize: 12.5 }}>{l.username}</td>
             <td><StateDot tone={l.state === 'active' ? 'ok' : l.state === 'revoked' ? 'idle' : 'warn'}>{l.state[0].toUpperCase() + l.state.slice(1)}</StateDot>{l.revoke_error && <div className="c-sub err" title={l.revoke_error}>revoke failed</div>}</td>
             <td className="muted" style={{ fontSize: 13 }}>{l.created_by}</td><td className="muted">{l.state === 'active' ? left(l.expires_at) : ago(l.revoked_at || l.expires_at)}</td>
             <td style={{ textAlign: 'right' }}>{l.state !== 'revoked' && <button className="btn sm ghost danger" onClick={async () => { try { await api(`/projects/${pid}/dynamic/${cfg.id}/leases/${l.id}`, { method: 'DELETE' }); load() } catch (e) { toast(e.message) } }}>Revoke now</button>}</td></tr>))}
-        {rows && !rows.length && <tr><td colSpan="5" className="muted" style={{ textAlign: 'center', padding: 32 }}>No credentials generated yet.</td></tr>}
+        {rows && !rows.length && <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 32 }}>No credentials generated yet.</td></tr>}
       </tbody></table>
       <div className="modal-actions"><button className="btn" onClick={onClose}>Close</button></div>
     </Modal>

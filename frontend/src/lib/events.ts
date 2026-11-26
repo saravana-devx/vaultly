@@ -1,5 +1,5 @@
 // Human wording for audit actions, shared by the dashboard feed and the audit table.
-const EVENTS = {
+const EVENTS: Record<string, [string, string]> = {
   'auth.login': ['Signed in', 'info'], 'auth.register': ['Created account', 'ok'],
   'secret.create': ['Created secret', 'ok'], 'secret.update': ['Updated secret', 'warn'], 'secret.delete': ['Deleted secret', 'bad'],
   'secret.read': ['Revealed secret', 'info'], 'secret.rotate': ['Rotated secret', 'warn'], 'secret.rollback': ['Restored secret version', 'warn'],
@@ -14,7 +14,7 @@ const EVENTS = {
   'org.backup': ['Created backup', 'info'], 'org.restore': ['Restored backup', 'warn'],
 }
 
-export function describeEvent(action) {
+export function describeEvent(action: string) {
   const known = EVENTS[action]
   if (known) return { label: known[0], tone: known[1] }
   const text = action.replace(/[._]/g, ' ')

@@ -1,14 +1,15 @@
+import type { Row } from '../types'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Avatar, Modal, Icon, copy } from '../components/ui.jsx'
-import { ask, toast } from '../components/feedback.jsx'
-import { EmptyRow, EnvTag, Rel, RowMenu, TableFoot, cap, plural } from '../components/table.jsx'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { Avatar, Modal, Icon, copy } from '../components/ui'
+import { ask, toast } from '../components/feedback'
+import { EmptyRow, EnvTag, Rel, RowMenu, TableFoot, cap, plural } from '../components/table'
 
 const ENV_LEVELS = [['inherit', 'Same as workspace role'], ['none', 'No access'], ['viewer', 'Viewer (read only)'], ['developer', 'Developer (read & write)']]
 
-function EnvAccess({ slugs, value, onChange }) {
+function EnvAccess({ slugs, value, onChange }: { slugs: string[]; value: any; onChange: (...args: any[]) => void }) {
   if (!slugs.length) return <p className="muted" style={{ fontSize: 13 }}>Create a project to set per-environment access.</p>
   return (
     <div className="envgrid">
@@ -22,13 +23,13 @@ function EnvAccess({ slugs, value, onChange }) {
 
 export default function Members() {
   const { orgId, org, user, reloadOrgs } = useAuth()
-  const [list, setList] = useState([])
-  const [invites, setInvites] = useState([])
-  const [slugs, setSlugs] = useState([])
+  const [list, setList] = useState<Row[]>([])
+  const [invites, setInvites] = useState<Row[]>([])
+  const [slugs, setSlugs] = useState<string[]>([])
   const [params, setParams] = useSearchParams()
   const [inviting, setInviting] = useState(params.get('invite') === '1')
-  const [editing, setEditing] = useState(null)
-  const [link, setLink] = useState(null)
+  const [editing, setEditing] = useState<Row | null>(null)
+  const [link, setLink] = useState<Row | null>(null)
   const admin = org?.role === 'admin'
   const load = () => {
     api(`/orgs/${orgId}/members`).then(setList)
@@ -36,7 +37,7 @@ export default function Members() {
     if (admin) api(`/orgs/${orgId}/invites`).then(setInvites)
   }
   useEffect(() => { load() }, [orgId, admin])
-  const act = async (fn) => { try { await fn(); load() } catch (x) { toast.error(x.message) } }
+  const act = async (fn: () => any) => { try { await fn(); load() } catch (x) { toast.error(x.message) } }
 
   return (
     <>
@@ -44,8 +45,8 @@ export default function Members() {
         {admin && <button className="btn primary" onClick={() => setInviting(true)}><Icon name="plus" size={15} /> Invite member</button>}</div>
       <div className="scroll-x"><table className="table"><thead><tr><th>Member</th><th style={{ width: 170 }}>Role</th><th>Environment access</th><th style={{ width: 130 }}>Joined</th><th style={{ width: 56 }} /></tr></thead><tbody>
         {list.map((m) => {
-          const overrides = Object.entries(m.env_roles || {})
-          const self = m.id === user.id
+          const overrides = Object.entries<string>(m.env_roles || {})
+          const self = m.id === user?.id
           return (
             <tr key={m.id}>
               <td>
@@ -90,8 +91,8 @@ export default function Members() {
         </section>
       )}
 
-      {inviting && <Invite orgId={orgId} slugs={slugs} onClose={() => { setInviting(false); params.delete('invite'); setParams(params, { replace: true }) }} onDone={(r) => { setInviting(false); setLink(r); load() }} />}
-      {editing && <EditAccess orgId={orgId} member={editing} slugs={slugs} onClose={() => setEditing(null)} onDone={() => { setEditing(null); load() }} />}
+      {inviting && <Invite orgId={orgId!} slugs={slugs} onClose={() => { setInviting(false); params.delete('invite'); setParams(params, { replace: true }) }} onDone={(r) => { setInviting(false); setLink(r); load() }} />}
+      {editing && <EditAccess orgId={orgId!} member={editing} slugs={slugs} onClose={() => setEditing(null)} onDone={() => { setEditing(null); load() }} />}
       {link && (
         <Modal title="Invitation sent" onClose={() => setLink(null)}>
           <p style={{ marginBottom: 12 }}>We emailed <b>{link.email}</b>. You can also share the link directly — it works once, for that email address, for 7 days.</p>
@@ -103,9 +104,9 @@ export default function Members() {
   )
 }
 
-function Invite({ orgId, slugs, onClose, onDone }) {
-  const [f, setF] = useState({ email: '', role: 'developer' })
-  const [env, setEnv] = useState({})
+function Invite({ orgId, slugs, onClose, onDone }: { orgId: string; slugs: string[]; onClose: (...args: any[]) => void; onDone: (...args: any[]) => void }) {
+  const [f, setF] = useState<Row>({ email: '', role: 'developer' })
+  const [env, setEnv] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
   return (
     <Modal title="Invite a member" onClose={onClose} wide>
@@ -122,7 +123,7 @@ function Invite({ orgId, slugs, onClose, onDone }) {
   )
 }
 
-function EditAccess({ orgId, member, slugs, onClose, onDone }) {
+function EditAccess({ orgId, member, slugs, onClose, onDone }: { orgId: string; member: Row; slugs: string[]; onClose: (...args: any[]) => void; onDone: (...args: any[]) => void }) {
   const [env, setEnv] = useState(member.env_roles || {})
   const [err, setErr] = useState('')
   return (

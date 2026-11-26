@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../auth.jsx'
-import { Icon, Logo, ThemeToggle, copy } from '../components/ui.jsx'
+import { useAuth } from '../auth'
+import { Icon, Logo, ThemeToggle, copy } from '../components/ui'
 
 const GITHUB = 'https://github.com/saravana-devx/vaultly'
 const SECTIONS = [
@@ -14,7 +15,7 @@ const SECTIONS = [
 ]
 
 // A command or snippet: plain text beside an accent rule, with a copy button.
-function Cmd({ children }) {
+function Cmd({ children }: { children: ReactNode }) {
   const text = String(children).trim()
   return (
     <div className="cmd">
@@ -24,7 +25,7 @@ function Cmd({ children }) {
   )
 }
 
-function Section({ id, title, lead, children }) {
+function Section({ id, title, lead, children }: { id: string; title: string; lead?: string; children: ReactNode }) {
   return (
     <section id={id} className="doc-sec">
       <h2>{title}</h2>

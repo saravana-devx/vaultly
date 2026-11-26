@@ -1,14 +1,16 @@
+import type { FormEvent } from 'react'
+import type { Row } from '../types'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Avatar, Modal, Icon, ago } from '../components/ui.jsx'
-import { EnvTag } from '../components/table.jsx'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { Avatar, Modal, Icon, ago } from '../components/ui'
+import { EnvTag } from '../components/table'
 
 export default function Projects() {
   const { orgId, org } = useAuth()
   const [params, setParams] = useSearchParams()
-  const [list, setList] = useState(null)
+  const [list, setList] = useState<Row | null>(null)
   const [open, setOpen] = useState(params.get('new') === '1')
   const [name, setName] = useState('')
   const [q, setQ] = useState('')
@@ -16,11 +18,11 @@ export default function Projects() {
   const load = () => api(`/orgs/${orgId}/projects`).then(setList)
   useEffect(() => { load() }, [orgId])
   const close = () => { setOpen(false); params.delete('new'); setParams(params, { replace: true }) }
-  const create = async (e) => {
+  const create = async (e: FormEvent) => {
     e.preventDefault(); setErr('')
     try { await api(`/orgs/${orgId}/projects`, { method: 'POST', body: { name } }); close(); setName(''); load(); window.dispatchEvent(new Event('vaultly:projects')) } catch (x) { setErr(x.message) }
   }
-  const shown = (list || []).filter((p) => p.name.toLowerCase().includes(q.toLowerCase()))
+  const shown = (list || []).filter((p: Row) => p.name.toLowerCase().includes(q.toLowerCase()))
   return (
     <>
       <div className="head"><div><h1>Projects</h1><p>Each project has its own encryption key and environments.</p></div>
@@ -32,10 +34,10 @@ export default function Projects() {
       ) : (
         <div className="ptable">
           <div className="hd"><span>Name</span><span>Environments</span><span>Secrets</span><span>Last activity</span><span /></div>
-          {shown.map((p) => (
+          {shown.map((p: Row) => (
             <Link to={`/app/projects/${p.id}`} key={p.id}>
               <span className="nm"><Avatar name={p.name} square size={28} /><span>{p.name}</span></span>
-              <span className="chips">{p.environments.slice(0, 3).map((e) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
+              <span className="chips">{p.environments.slice(0, 3).map((e: any) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
               <span className="num">{p.secret_count}</span>
               <span className="muted">{p.last_activity ? ago(p.last_activity) : ago(p.created_at)}</span>
               <Icon name="right" size={15} />

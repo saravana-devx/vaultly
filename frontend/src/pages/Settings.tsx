@@ -1,26 +1,28 @@
+import type { FormEvent } from 'react'
+import type { Row } from '../types'
 import { useEffect, useRef, useState } from 'react'
-import { api, apiBlob, apiForm } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Modal, Icon, copy } from '../components/ui.jsx'
-import { ask, toast } from '../components/feedback.jsx'
-import { EmptyRow, Rel, RowMenu, TableFoot, plural } from '../components/table.jsx'
+import { api, apiBlob, apiForm } from '../api'
+import { useAuth } from '../auth'
+import { Modal, Icon, copy } from '../components/ui'
+import { ask, toast } from '../components/feedback'
+import { EmptyRow, Rel, RowMenu, TableFoot, plural } from '../components/table'
 
 export default function Settings() {
   const { org, orgId, user } = useAuth()
   return (
     <>
-      <div className="head"><div><h1>Settings</h1><p>{user.email}</p></div></div>
+      <div className="head"><div><h1>Settings</h1><p>{user?.email}</p></div></div>
       <PersonalTokens />
-      {org?.role === 'admin' && <Backup orgId={orgId} orgName={org.name} />}
+      {org?.role === 'admin' && <Backup orgId={orgId!} orgName={org.name} />}
     </>
   )
 }
 
 function PersonalTokens() {
-  const [list, setList] = useState(null)
+  const [list, setList] = useState<Row | null>(null)
   const [open, setOpen] = useState(false)
-  const [created, setCreated] = useState(null)
-  const [f, setF] = useState({ name: '', expire_days: 90 })
+  const [created, setCreated] = useState<string | null>(null)
+  const [f, setF] = useState<Row>({ name: '', expire_days: 90 })
   const [err, setErr] = useState('')
   const load = () => api('/me/tokens').then(setList)
   useEffect(() => { load() }, [])
@@ -29,7 +31,7 @@ function PersonalTokens() {
       <div className="sect"><div><h2>Personal access tokens</h2><small>Call the API as yourself, with your roles and environment access. Use them for scripts and local tooling.</small></div>
         <button className="btn" onClick={() => { setErr(''); setOpen(true) }}><Icon name="plus" size={15} /> New token</button></div>
       <div className="scroll-x"><table className="table"><thead><tr><th>Name</th><th>Token</th><th>Expires</th><th>Last used</th><th style={{ width: 56 }} /></tr></thead><tbody>
-        {(list || []).map((t) => (
+        {(list || []).map((t: Row) => (
           <tr key={t.id}>
             <td className="c-main">{t.name}</td>
             <td className="mono dim" style={{ fontSize: 12.5 }}>{t.prefix}…</td>
@@ -61,15 +63,15 @@ function PersonalTokens() {
   )
 }
 
-function Backup({ orgId, orgName }) {
+function Backup({ orgId, orgName }: { orgId: string; orgName: string }) {
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [rpass, setRpass] = useState('')
-  const [result, setResult] = useState(null)
-  const file = useRef()
+  const [result, setResult] = useState<Row | null>(null)
+  const file = useRef<HTMLInputElement>(null)
 
-  const download = async (e) => {
+  const download = async (e: FormEvent) => {
     e.preventDefault(); setErr(''); setBusy(true)
     try {
       const blob = await apiBlob(`/orgs/${orgId}/backup`, { passphrase: pass })
@@ -78,11 +80,11 @@ function Backup({ orgId, orgName }) {
     } catch (x) { setErr(x.message) }
     setBusy(false)
   }
-  const restore = async (e) => {
+  const restore = async (e: FormEvent) => {
     e.preventDefault(); setErr(''); setResult(null)
-    const fd = new FormData(); fd.append('file', file.current.files[0]); fd.append('passphrase', rpass)
+    const fd = new FormData(); fd.append('file', file.current!.files![0]); fd.append('passphrase', rpass)
     setBusy(true)
-    try { setResult(await apiForm(`/orgs/${orgId}/restore`, fd)); setRpass(''); file.current.value = ''; window.dispatchEvent(new Event('vaultly:projects')) } catch (x) { setErr(x.message) }
+    try { setResult(await apiForm(`/orgs/${orgId}/restore`, fd)); setRpass(''); file.current!.value = ''; window.dispatchEvent(new Event('vaultly:projects')) } catch (x) { setErr(x.message) }
     setBusy(false)
   }
   return (
@@ -107,7 +109,7 @@ function Backup({ orgId, orgName }) {
       {result && (
         <div className="alert warn" style={{ marginTop: 18 }}>
           Restored {result.restored} project{result.restored === 1 ? '' : 's'} ({result.secrets} secrets).
-          {result.skipped?.map((s) => <div key={s.project}>Skipped <b>{s.project}</b>: {s.reason}</div>)}
+          {result.skipped?.map((s: Row) => <div key={s.project}>Skipped <b>{s.project}</b>: {s.reason}</div>)}
         </div>
       )}
     </section>

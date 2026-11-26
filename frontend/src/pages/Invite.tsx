@@ -1,14 +1,15 @@
+import type { Row } from '../types'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api.js'
-import { useAuth } from '../auth.jsx'
-import { Logo } from '../components/ui.jsx'
+import { api } from '../api'
+import { useAuth } from '../auth'
+import { Logo } from '../components/ui'
 
 export default function Invite() {
   const { token } = useParams()
   const { user, loading, reloadOrgs, switchOrg } = useAuth()
   const nav = useNavigate()
-  const [inv, setInv] = useState(null)
+  const [inv, setInv] = useState<Row | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => { api(`/invites/${token}`, { auth: false }).then(setInv).catch((e) => setErr(e.message)) }, [token])
