@@ -60,7 +60,7 @@ function Password({ name, autoComplete, placeholder, onChange }: { name: string;
   )
 }
 
-const safeNext = (p: URLSearchParams) => { const n = p.get('next'); return n && n.startsWith('/') && !n.startsWith('//') ? n : '/app' }
+const safeNext = (p: URLSearchParams) => { const n = p.get('next'); return n && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard' }
 
 export function Login() {
   const { login } = useAuth(); const nav = useNavigate(); const [params] = useSearchParams()

@@ -12,7 +12,7 @@ ENTRY AND ROUTING
   src/App.tsx        route table
      /                 Landing (public)             /login /register  AuthPages
      /invite/:token    Invite acceptance (public)
-     /app              Shell (private) with children:
+     /dashboard        Shell (private) with children:
         index Dashboard | projects Projects | projects/:pid Project | members Members |
         audit Audit | settings Settings
   Private()/Public() wrappers redirect based on session. ?next=/path survives login/register
@@ -50,6 +50,9 @@ PAGES (src/pages)
   Audit.tsx           filterable audit table with "load more"
   Settings.tsx        personal tokens, backup and restore
   Invite.tsx          accept-an-invitation page
+  Docs.tsx            public documentation site at /docs/:page (sidebar, search, on-this-page, prev/next)
+  docs/pages.tsx      the documentation content, one entry per page (edit here to change the docs)
+  docs/parts.tsx      Cmd (copy-able snippet), Note (callout) and Table used by the docs pages
 
 DESIGN SYSTEM (src/styles.css)
   One file, three layers:

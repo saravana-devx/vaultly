@@ -18,7 +18,7 @@ export default function Invite() {
     setBusy(true); setErr('')
     try {
       const r = await api(`/invites/${token}/accept`, { method: 'POST' })
-      await reloadOrgs(); switchOrg(r.org_id); nav('/app')
+      await reloadOrgs(); switchOrg(r.org_id); nav('/dashboard')
     } catch (e) { setErr(e.message); setBusy(false) }
   }
   const next = encodeURIComponent(`/invite/${token}`)
@@ -30,7 +30,7 @@ export default function Invite() {
         <div className="auth-form" style={{ textAlign: 'center' }}>
           {!inv && !err && <div className="spinner" style={{ margin: '0 auto' }} />}
           {err && !inv && <><h1>Invitation not found</h1><p className="sub">{err}</p><Link className="btn" to="/">Go home</Link></>}
-          {inv && state !== 'pending' && <><h1>{state === 'accepted' ? 'Already accepted' : 'Invitation expired'}</h1><p className="sub">{state === 'accepted' ? 'This invitation has already been used.' : 'Ask an admin to send a new one.'}</p><Link className="btn" to={user ? '/app' : '/login'}>{user ? 'Open dashboard' : 'Sign in'}</Link></>}
+          {inv && state !== 'pending' && <><h1>{state === 'accepted' ? 'Already accepted' : 'Invitation expired'}</h1><p className="sub">{state === 'accepted' ? 'This invitation has already been used.' : 'Ask an admin to send a new one.'}</p><Link className="btn" to={user ? '/dashboard' : '/login'}>{user ? 'Open dashboard' : 'Sign in'}</Link></>}
           {inv && state === 'pending' && (
             <>
               <h1>Join {inv.org}</h1>

@@ -35,7 +35,7 @@ export default function Projects() {
         <div className="ptable">
           <div className="hd"><span>Name</span><span>Environments</span><span>Secrets</span><span>Last activity</span><span /></div>
           {shown.map((p: Row) => (
-            <Link to={`/app/projects/${p.id}`} key={p.id}>
+            <Link to={`/dashboard/projects/${p.id}`} key={p.id}>
               <span className="nm"><Avatar name={p.name} square size={28} /><span>{p.name}</span></span>
               <span className="chips">{p.environments.slice(0, 3).map((e: any) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
               <span className="num">{p.secret_count}</span>

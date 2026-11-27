@@ -25,7 +25,7 @@ function Public({ children }: { children: ReactElement }) {
   const [params] = useSearchParams()
   if (loading) return <div className="splash"><div className="spinner" /></div>
   const next = params.get('next')
-  return user ? <Navigate to={next && next.startsWith('/') && !next.startsWith('//') ? next : '/app'} replace /> : children
+  return user ? <Navigate to={next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'} replace /> : children
 }
 
 export default function App() {
@@ -38,7 +38,8 @@ export default function App() {
       <Route path="/register" element={<Public><Register /></Public>} />
       <Route path="/invite/:token" element={<Invite />} />
       <Route path="/docs" element={<Docs />} />
-      <Route path="/app" element={<Private><Shell /></Private>}>
+      <Route path="/docs/:slug" element={<Docs />} />
+      <Route path="/dashboard" element={<Private><Shell /></Private>}>
         <Route index element={<Dashboard />} />
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:pid" element={<Project />} />

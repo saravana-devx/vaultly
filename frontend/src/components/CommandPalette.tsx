@@ -23,21 +23,21 @@ export default function CommandPalette({ open, onClose, projects, admin }: { ope
   const items = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => nav(to)
     const pages = [
-      { id: 'p:overview', kind: 'Page', label: 'Overview', desc: 'Your workspace at a glance', icon: 'home', run: go('/app') },
-      { id: 'p:projects', kind: 'Page', label: 'All projects', desc: 'Browse every project', icon: 'layers', run: go('/app/projects') },
-      { id: 'p:members', kind: 'Page', label: 'Members', desc: 'People and their access', icon: 'users', run: go('/app/members') },
-      ...(admin ? [{ id: 'p:audit', kind: 'Page', label: 'Audit log', desc: 'Who did what, and when', icon: 'log', run: go('/app/audit') }] : []),
-      { id: 'p:settings', kind: 'Page', label: 'Settings', desc: 'Your account, tokens and backups', icon: 'cog', run: go('/app/settings') },
+      { id: 'p:overview', kind: 'Page', label: 'Overview', desc: 'Your workspace at a glance', icon: 'home', run: go('/dashboard') },
+      { id: 'p:projects', kind: 'Page', label: 'All projects', desc: 'Browse every project', icon: 'layers', run: go('/dashboard/projects') },
+      { id: 'p:members', kind: 'Page', label: 'Members', desc: 'People and their access', icon: 'users', run: go('/dashboard/members') },
+      ...(admin ? [{ id: 'p:audit', kind: 'Page', label: 'Audit log', desc: 'Who did what, and when', icon: 'log', run: go('/dashboard/audit') }] : []),
+      { id: 'p:settings', kind: 'Page', label: 'Settings', desc: 'Your account, tokens and backups', icon: 'cog', run: go('/dashboard/settings') },
       { id: 'p:docs', kind: 'Page', label: 'Documentation', desc: 'Quickstart, CLI and API', icon: 'book', run: () => window.open('/docs', '_blank', 'noopener') },
     ]
     const actions = admin ? [
-      { id: 'a:project', kind: 'Action', label: 'Create project', desc: 'Start a new set of secrets', icon: 'plus', run: go('/app/projects?new=1') },
-      { id: 'a:invite', kind: 'Action', label: 'Invite a member', desc: 'Send an invitation by email', icon: 'users', run: go('/app/members?invite=1') },
+      { id: 'a:project', kind: 'Action', label: 'Create project', desc: 'Start a new set of secrets', icon: 'plus', run: go('/dashboard/projects?new=1') },
+      { id: 'a:invite', kind: 'Action', label: 'Invite a member', desc: 'Send an invitation by email', icon: 'users', run: go('/dashboard/members?invite=1') },
     ] : []
     const proj = projects.map((p): PaletteItem => ({
       id: `j:${p.id}`, kind: 'Project', label: p.name, avatar: p.name,
       desc: `${p.secret_count} secret${p.secret_count === 1 ? '' : 's'} · ${p.environments.length} environment${p.environments.length === 1 ? '' : 's'}`,
-      run: go(`/app/projects/${p.id}`),
+      run: go(`/dashboard/projects/${p.id}`),
     }))
     return [...actions, ...pages, ...proj]
   }, [projects, admin, nav])

@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 import type { Row } from '../types'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { Link } from 'react-router-dom'
@@ -19,14 +19,14 @@ export default function Project() {
   const [tab, setTab] = useState('secrets')
 
   const load = useCallback(() => api(`/projects/${pid}`).then((p) => { setProject(p); setEnv((e) => (p.environments.some((x: Row) => x.slug === e) ? e : p.environments[0]?.slug || '')) }), [pid])
-  useEffect(() => { setProject(null); setTab('secrets'); setEnv(''); load().catch(() => nav('/app/projects')) }, [load, nav])
+  useEffect(() => { setProject(null); setTab('secrets'); setEnv(''); load().catch(() => nav('/dashboard/projects')) }, [load, nav])
   if (!project) return <div className="spinner" style={{ margin: 40 }} />
   const admin = project.role === 'admin'
   const canWrite = project.role !== 'viewer'
 
   return (
     <>
-      <div className="crumb"><Link to="/app/projects">Projects</Link><Icon name="right" size={12} /><b>{project.name}</b></div>
+      <div className="crumb"><Link to="/dashboard/projects">Projects</Link><Icon name="right" size={12} /><b>{project.name}</b></div>
       <div className="ptitle">
         <Avatar name={project.name} square size={40} />
         <div><h1>{project.name}</h1><div className="sub">{project.environments.length} environments · <span style={{ textTransform: 'capitalize' }}>{project.role}</span> access</div></div>
@@ -48,6 +48,8 @@ export default function Project() {
     </>
   )
 }
+
+const AUTO_HIDE_MS = 15000
 
 function EnvPicker({ project, env, setEnv }: { project: Row; env: string; setEnv: (...args: any[]) => void }) {
   return <div className="seg" role="tablist">{project.environments.map((e: any) => <button key={e.id} role="tab" aria-selected={env === e.slug} className={env === e.slug ? 'on' : ''} onClick={() => setEnv(e.slug)}>{e.name}</button>)}</div>
@@ -82,6 +84,19 @@ function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string
     const t = setTimeout(() => api(`/projects/${pid}/secrets/search?q=${encodeURIComponent(q.trim())}`).then((d) => setFound(d.results)).catch(() => setFound([])), 250)
     return () => clearTimeout(t)
   }, [q, pid])
+
+  // A revealed value hides itself again after a short time, so it is never left on screen.
+  const hideTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  useEffect(() => {
+    const timers = hideTimers.current
+    const drop = (id: string) => (r: Record<string, any>) => { const n = { ...r }; delete n[id]; return n }
+    Object.keys(revealed).forEach((id) => {
+      if (timers.has(id)) return
+      timers.set(id, setTimeout(() => { timers.delete(id); setRevealed(drop(id)); setResolved(drop(id)) }, AUTO_HIDE_MS))
+    })
+    timers.forEach((t, id) => { if (!(id in revealed)) { clearTimeout(t); timers.delete(id) } })
+  }, [revealed])
+  useEffect(() => () => hideTimers.current.forEach(clearTimeout), [])
 
   const reveal = async (s: Row) => {
     if (revealed[s.id] !== undefined) return setRevealed((r) => { const n = { ...r }; delete n[s.id]; return n })
@@ -153,7 +168,7 @@ function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string
                   <div className="vcell">
                     <span className={`v ${shown ? 'shown' : ''}`}>{shown ? revealed[s.id] : '••••••••••••'}</span>
                     <span className="vb">
-                      <button className="iconbtn" title={shown ? 'Hide value' : 'Reveal value'} aria-label={shown ? 'Hide value' : 'Reveal value'} onClick={() => reveal(s)}><Icon name={shown ? 'eyeoff' : 'eye'} size={15} /></button>
+                      <button className="iconbtn" title={shown ? 'Hide value' : `Reveal value (hides after ${AUTO_HIDE_MS / 1000} s)`} aria-label={shown ? 'Hide value' : 'Reveal value'} onClick={() => reveal(s)}><Icon name={shown ? 'eyeoff' : 'eye'} size={15} /></button>
                       <button className="iconbtn" title="Copy value" aria-label="Copy value" onClick={() => copyVal(s)}><Icon name="copy" size={15} /></button>
                     </span>
                   </div>
@@ -322,7 +337,7 @@ function Settings({ project, reload, nav }: { project: Row; reload: (...args: an
         <input className="input" style={{ maxWidth: 260, height: 34 }} placeholder="New environment, e.g. QA" value={name} onChange={(e) => setName(e.target.value)} required /><button className="btn">Add environment</button></form>
       <div className="danger-zone">
         <div><b>Delete this project</b><span>Permanently removes all secrets, versions and tokens. This can’t be undone.</span></div>
-        <button className="btn danger" onClick={async () => { if (await ask(`Delete "${project.name}" and ALL its secrets? This cannot be undone.`, { confirm: 'Delete', danger: true })) { await api(`/projects/${project.id}`, { method: 'DELETE' }); window.dispatchEvent(new Event('vaultly:projects')); nav('/app/projects') } }}>Delete project</button>
+        <button className="btn danger" onClick={async () => { if (await ask(`Delete "${project.name}" and ALL its secrets? This cannot be undone.`, { confirm: 'Delete', danger: true })) { await api(`/projects/${project.id}`, { method: 'DELETE' }); window.dispatchEvent(new Event('vaultly:projects')); nav('/dashboard/projects') } }}>Delete project</button>
       </div>
     </>
   )

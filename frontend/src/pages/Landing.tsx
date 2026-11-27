@@ -30,7 +30,7 @@ export default function Landing({ signedIn }: { signedIn?: boolean }) {
     on(); window.addEventListener('scroll', on, { passive: true })
     return () => window.removeEventListener('scroll', on)
   }, [])
-  const start = signedIn ? '/app' : '/register'
+  const start = signedIn ? '/dashboard' : '/register'
   return (
     <div className="lp">
       <header className={`lp-nav ${scrolled ? 'scrolled' : ''}`}>
@@ -39,7 +39,7 @@ export default function Landing({ signedIn }: { signedIn?: boolean }) {
           <nav className="lp-links"><a href="#product">Product</a><a href="#security">Security</a><a href="#cli">CLI &amp; API</a><a href="#hosting">Cloud &amp; self-host</a><a href="#faq">FAQ</a><Link to="/docs">Docs</Link></nav>
           <div className="right">
             <ThemeToggle />
-            {signedIn ? <Link className="btn primary sm" to="/app">Open dashboard</Link> : <>
+            {signedIn ? <Link className="btn primary sm" to="/dashboard">Open dashboard</Link> : <>
               <Link className="btn ghost sm" to="/login">Sign in</Link><Link className="btn primary sm" to="/register">Get started</Link></>}
           </div>
         </div>
@@ -234,7 +234,7 @@ make up`}</pre>
             <h4>Developers</h4>
             <a href="https://github.com/saravana-devx/vaultly" target="_blank" rel="noreferrer">GitHub</a>
             <Link to="/docs">Documentation</Link>
-            <a href="https://github.com/saravana-devx/vaultly/blob/main/docs/06_API_REFERENCE.txt" target="_blank" rel="noreferrer">API reference</a>
+            <Link to="/docs/api">API reference</Link>
             <a href="#faq">FAQ</a>
           </nav>
           <nav aria-label="Account">

@@ -1,10 +1,11 @@
 import type { FormEvent } from 'react'
 import type { Row } from '../types'
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { Avatar, Icon, ago, shortName } from '../components/ui'
+import { toast } from '../components/feedback'
 import { EnvTag } from '../components/table'
 
 const VERB: Record<string, string> = {
@@ -42,24 +43,66 @@ function Stat({ icon, label, caption, value, pill, foot, to }: { icon?: string; 
   return to ? <Link className="dstat" to={to}>{body}</Link> : <div className="dstat">{body}</div>
 }
 
-function Chart({ data }: { data: Row }) {
-  const max = Math.max(1, ...data.map((d: Row) => d.count))
+// Smooth line through the points. Control points are clamped between the two neighbours so the
+// curve never dips below the baseline or overshoots a peak.
+function smoothPath(pts: [number, number][]) {
+  if (pts.length < 2) return ''
+  let d = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2
+    const lo = Math.min(p1[1], p2[1]), hi = Math.max(p1[1], p2[1])
+    const c1y = Math.min(hi, Math.max(lo, p1[1] + (p2[1] - p0[1]) / 6))
+    const c2y = Math.min(hi, Math.max(lo, p2[1] - (p3[1] - p1[1]) / 6))
+    d += ` C${p1[0] + (p2[0] - p0[0]) / 6},${c1y} ${p2[0] - (p3[0] - p1[0]) / 6},${c2y} ${p2[0]},${p2[1]}`
+  }
+  return d
+}
+
+function Chart({ data }: { data: Row[] }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const W = 1000, H = 240, PAD = 14
+  const n = data.length
+  const max = Math.max(1, ...data.map((d) => d.count))
   const top = max <= 4 ? 4 : Math.ceil(max / 4) * 4
   const fmt = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const px = (i: number) => (n > 1 ? (i / (n - 1)) * W : W / 2)
+  const py = (v: number) => H - (v / top) * (H - PAD)
+  const pts: [number, number][] = data.map((d, i) => [px(i), py(d.count)])
+  const line = smoothPath(pts)
+  const area = `${line} L${W},${H} L0,${H} Z`
+  const at = (i: number) => ({ left: `${(px(i) / W) * 100}%`, top: `${(py(data[i].count) / H) * 100}%` })
+  const onMove = (e: React.MouseEvent) => {
+    const r = box.current!.getBoundingClientRect()
+    setHover(Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1)))))
+  }
+  const last = n - 1
   return (
     <div className="chart2">
       <div className="yaxis">{[top, top / 2, 0].map((v) => <span key={v}>{v}</span>)}</div>
       <div className="plot">
         <i className="gl" style={{ top: 0 }} /><i className="gl" style={{ top: '50%' }} /><i className="gl" style={{ bottom: 0 }} />
-        <div className="bars">
-          {data.map((d: Row, i: number) => (
-            <div className="col" key={d.day}>
-              <span className="tip"><b>{d.count}</b> events · {fmt(d.day)}</span>
-              <i className={i === data.length - 1 ? 'now' : ''} style={{ height: `${(d.count / top) * 100}%` }} />
-            </div>
-          ))}
+        <div className="area" ref={box} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="act-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" style={{ stopColor: 'var(--chart)', stopOpacity: 0.34 }} />
+                <stop offset="100%" style={{ stopColor: 'var(--chart)', stopOpacity: 0 }} />
+              </linearGradient>
+            </defs>
+            <path className="fill" d={area} fill="url(#act-grad)" />
+            <path className="ln" d={line} />
+          </svg>
+          {hover != null && <i className="guide" style={{ left: at(hover).left }} />}
+          <i className={`dot${hover == null || hover === last ? ' on' : ''}`} style={at(last)} />
+          {hover != null && hover !== last && <i className="dot on" style={at(hover)} />}
+          {hover != null && (
+            <span className={`tip2${hover < 2 ? ' l' : hover > n - 3 ? ' r' : ''}`} style={at(hover)}>
+              <b>{data[hover].count}</b> event{data[hover].count === 1 ? '' : 's'} · {hover === last ? 'Today' : fmt(data[hover].day)}
+            </span>
+          )}
         </div>
-        <div className="xaxis"><span>{fmt(data[0].day)}</span><span>{fmt(data[Math.floor(data.length / 2)].day)}</span><span>Today</span></div>
+        <div className="xaxis"><span>{fmt(data[0].day)}</span><span>{fmt(data[Math.floor(n / 2)].day)}</span><span>Today</span></div>
       </div>
     </div>
   )
@@ -71,6 +114,8 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Row | null>(null)
   const [range, setRange] = useState(14)
   const [allAttn, setAllAttn] = useState(false)
+  const [seeding, setSeeding] = useState(false)
+  const nav = useNavigate()
   const admin = org?.role === 'admin'
 
   useEffect(() => {
@@ -87,12 +132,29 @@ export default function Dashboard() {
   const maxSecrets = Math.max(1, ...(projects || []).map((p: Row) => p.secret_count))
   const expiringTokens = attention.filter((a) => a.kind === 'token').length
   const onboarding = stats && (stats.projects === 0 || stats.secrets === 0 || stats.tokens === 0)
-  const first = projects?.[0] ? `/app/projects/${projects[0].id}` : '/app/projects'
+  const first = projects?.[0] ? `/dashboard/projects/${projects[0].id}` : '/dashboard/projects'
   const steps = onboarding && ([
-    ['Create a project', 'Each project gets its own encryption key.', stats.projects > 0, '/app/projects?new=1'],
+    ['Create a project', 'Each project gets its own encryption key.', stats.projects > 0, '/dashboard/projects?new=1'],
     ['Add your first secrets', 'One by one, or import a .env file.', stats.secrets > 0, first],
     ['Create a service token', 'Lets CI or your app fetch secrets without a login.', stats.tokens > 0, first],
   ] as [string, string, boolean, string][])
+  // One click gives a new workspace something to look at: a project with a few made-up secrets.
+  const loadSample = async () => {
+    setSeeding(true)
+    try {
+      const p = await api(`/orgs/${orgId}/projects`, { method: 'POST', body: { name: 'sample-app' }, quiet: true })
+      const env = p.environments?.[0]?.slug || 'dev'
+      const put = (key: string, value: string, path = '/') => api(`/projects/${p.id}/secrets`, { method: 'PUT', body: { env, key, value, path }, quiet: true })
+      await put('DATABASE_URL', 'postgres://app:change-me@localhost:5432/app')
+      await put('REDIS_URL', 'redis://localhost:6379/0')
+      await put('JWT_SIGNING_KEY', 'sample-signing-key-not-a-real-secret')
+      await put('API_BASE_URL', 'https://api.example.com')
+      await put('STRIPE_SECRET_KEY', 'sk_test_sample_not_a_real_key', '/payments')
+      window.dispatchEvent(new Event('vaultly:projects'))
+      toast('Sample project created with five example secrets')
+      nav(`/dashboard/projects/${p.id}`)
+    } catch (x: any) { toast.error(x.message || 'Could not create the sample project') } finally { setSeeding(false) }
+  }
   const shownAttn = allAttn ? attention : attention.slice(0, 4)
 
   const envCount = (projects || []).reduce((n: any, p: any) => n + p.environments.length, 0)
@@ -112,15 +174,15 @@ export default function Dashboard() {
           <div className="hero-s">{stats ? `${stats.projects} project${stats.projects === 1 ? '' : 's'} · ${envCount} environment${envCount === 1 ? '' : 's'} · ${stats.events_24h} events in the last 24 hours` : ' '}</div>
         </div>
         <div className="hero-actions">
-          {admin && <Link className="btn primary" to="/app/projects?new=1"><Icon name="plus" size={15} /> New project</Link>}
+          {admin && <Link className="btn primary" to="/dashboard/projects?new=1"><Icon name="plus" size={15} /> New project</Link>}
           <Link className="btn glass" to={first}><Icon name="key2" size={15} /> Add secret</Link>
-          {admin && <Link className="btn glass" to="/app/members?invite=1"><Icon name="users" size={15} /> Invite</Link>}
+          {admin && <Link className="btn glass" to="/dashboard/members?invite=1"><Icon name="users" size={15} /> Invite</Link>}
         </div>
       </section>
 
       {steps && (
         <section className="panel" style={{ marginBottom: 16 }}>
-          <div className="panel-h"><h2>Get started</h2><span className="muted">{steps.filter((s) => s[2]).length} of 3 done</span></div>
+          <div className="panel-h"><h2>Get started</h2><span className="panel-act">{admin && stats.projects === 0 && <button className="btn sm" disabled={seeding} onClick={loadSample}>{seeding ? 'Creating…' : 'Load sample data'}</button>}<span className="muted">{steps.filter((s) => s[2]).length} of 3 done</span></span></div>
           <div className="onb">{steps.map(([t, m, done, to]) => (
             <div key={t} className={done ? 'done' : ''}><span className="dot"><Icon name="check" size={12} stroke={3} /></span><div><div className="t">{t}</div><div className="m">{m}</div></div>
               {!done && <Link className="btn sm" to={to}>Start</Link>}</div>))}</div>
@@ -151,14 +213,14 @@ export default function Dashboard() {
 
       <div className="dstats">
         <Stat icon="key2" label="Service tokens" caption="Machines" value={stats?.tokens} pill={stats ? (expiringTokens ? [`${expiringTokens} need attention`, 'warn'] : ['All healthy', 'ok']) : null} foot="Each token is limited to one environment and path." />
-        <Stat icon="users" label="Members" caption="People" value={stats?.members} to="/app/members" pill={stats ? (stats.pending_invites ? [`${stats.pending_invites} pending`, 'info'] : ['No pending invites', 'plain']) : null} foot={`You are ${org?.role === 'admin' ? 'an' : 'a'} ${org?.role} in this workspace.`} />
-        <Stat icon="layers" label="Projects" caption="Workspace" value={stats?.projects} to="/app/projects" pill={stats ? [`${envCount} environments`, 'plain'] : null} foot={stats ? `About ${perProject} secrets per project.` : ' '} />
+        <Stat icon="users" label="Members" caption="People" value={stats?.members} to="/dashboard/members" pill={stats ? (stats.pending_invites ? [`${stats.pending_invites} pending`, 'info'] : ['No pending invites', 'plain']) : null} foot={`You are ${org?.role === 'admin' ? 'an' : 'a'} ${org?.role} in this workspace.`} />
+        <Stat icon="layers" label="Projects" caption="Workspace" value={stats?.projects} to="/dashboard/projects" pill={stats ? [`${envCount} environments`, 'plain'] : null} foot={stats ? `About ${perProject} secrets per project.` : ' '} />
       </div>
 
       <div className="dtwo">
         {admin && stats?.recent ? (
           <section className="dcard" style={{ marginBottom: 0 }}>
-            <div className="dcard-h"><div className="dtitle"><i className="tile"><Icon name="log" size={16} /></i>Recent activity</div><Link to="/app/audit" className="link">View log</Link></div>
+            <div className="dcard-h"><div className="dtitle"><i className="tile"><Icon name="log" size={16} /></i>Recent activity</div><Link to="/dashboard/audit" className="link">View log</Link></div>
             <div className="atab">
               <div className="ar-h"><span>Event</span><span>Project</span><span>Type</span><span>When</span></div>
               {stats.recent.slice(0, 6).map((e: Row, i: number) => {
@@ -186,7 +248,7 @@ export default function Dashboard() {
             {attention.length === 0 ? <div className="allgood"><Icon name="check" size={16} /> Nothing needs attention.</div> : (
               <div className="arows">
                 {shownAttn.map((a, i) => (
-                  <Link key={i} to={`/app/projects/${a.project_id}`} className="arow">
+                  <Link key={i} to={`/dashboard/projects/${a.project_id}`} className="arow">
                     <span className={`aic ${a.kind}`}><Icon name={a.kind === 'secret' ? 'key2' : 'alert'} size={14} /></span>
                     <span className="at"><b className={a.kind === 'secret' ? 'mono' : ''}>{a.token}</b><small>{a.project}</small></span>
                     <span className={`ar ${/expired/i.test(a.reason) ? 'bad' : ''}`}>{a.reason.replace('Secret expires', 'Expires').replace('Secret expired', 'Expired').replace(/\b1 days\b/, '1 day')}</span>
@@ -199,12 +261,12 @@ export default function Dashboard() {
       </div>
 
       <section className="dcard">
-        <div className="dcard-h"><div className="dtitle"><i className="tile"><Icon name="layers" size={16} /></i>Projects</div><Link to="/app/projects" className="link">View all</Link></div>
+        <div className="dcard-h"><div className="dtitle"><i className="tile"><Icon name="layers" size={16} /></i>Projects</div><Link to="/dashboard/projects" className="link">View all</Link></div>
         {projects && projects.length === 0 ? <div className="empty-in"><h3>No projects yet</h3><p>Projects hold your secrets, grouped by environment.</p></div> : (
           <div className="prow-wrap">
             <div className="prow hd"><span>Name</span><span>Environments</span><span>Secrets</span><span>Last activity</span></div>
             {(projects || []).slice(0, 6).map((p: Row) => (
-              <Link to={`/app/projects/${p.id}`} key={p.id} className="prow">
+              <Link to={`/dashboard/projects/${p.id}`} key={p.id} className="prow">
                 <span className="nm"><Avatar name={p.name} square size={28} /><span>{p.name}</span></span>
                 <span className="chips">{p.environments.slice(0, 3).map((e: any) => <EnvTag key={e.id} slug={e.slug} />)}{p.environments.length > 3 && <i>+{p.environments.length - 3}</i>}</span>
                 <span className="sc"><b>{p.secret_count}</b><u><i style={{ width: `${(p.secret_count / maxSecrets) * 100}%` }} /></u></span>

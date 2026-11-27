@@ -43,7 +43,7 @@ export default function Shell() {
     <div className={`shell${collapsed ? ' collapsed' : ''}`}>
       <aside className="side">
         <div className="side-top">
-          <Link to="/app" className="side-brand" aria-label="Vaultly overview"><Logo size={26} /></Link>
+          <Link to="/dashboard" className="side-brand" aria-label="Vaultly overview"><Logo size={26} /></Link>
           <button className="iconbtn side-collapse" onClick={toggleSidebar} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}><Icon name="panel" size={16} /></button>
         </div>
 
@@ -53,20 +53,20 @@ export default function Shell() {
             <span className="ws-t"><b>{org?.name}</b><small>{org?.role}</small></span>
             <Icon name="updown" size={14} />
           </span>
-        } items={orgs.map((o) => ({ label: o.name, icon: 'layers', active: o.id === orgId, run: () => { switchOrg(o.id); nav('/app') } }))} />
+        } items={orgs.map((o) => ({ label: o.name, icon: 'layers', active: o.id === orgId, run: () => { switchOrg(o.id); nav('/dashboard') } }))} />
 
         <div className="nav-h first"><span>General</span></div>
-        <NavLink end to="/app" className={link} title="Overview"><Icon name="home" /><span className="nl">Overview</span></NavLink>
-        <NavLink end to="/app/projects" className={link} title="Projects"><Icon name="layers" /><span className="nl">Projects</span>{projects.length > 0 && <span className="navcount">{projects.length}</span>}</NavLink>
-        <NavLink to="/app/members" className={link} title="Members"><Icon name="users" /><span className="nl">Members</span></NavLink>
-        {admin && <NavLink to="/app/audit" className={link} title="Audit log"><Icon name="log" /><span className="nl">Audit log</span></NavLink>}
+        <NavLink end to="/dashboard" className={link} title="Overview"><Icon name="home" /><span className="nl">Overview</span></NavLink>
+        <NavLink end to="/dashboard/projects" className={link} title="Projects"><Icon name="layers" /><span className="nl">Projects</span>{projects.length > 0 && <span className="navcount">{projects.length}</span>}</NavLink>
+        <NavLink to="/dashboard/members" className={link} title="Members"><Icon name="users" /><span className="nl">Members</span></NavLink>
+        {admin && <NavLink to="/dashboard/audit" className={link} title="Audit log"><Icon name="log" /><span className="nl">Audit log</span></NavLink>}
 
         {projects.length > 0 && (
-          <div className="nav-h"><span>Projects</span>{admin && <Link to="/app/projects?new=1" className="nav-plus" title="New project" aria-label="New project"><Icon name="plus" size={14} /></Link>}</div>
+          <div className="nav-h"><span>Projects</span>{admin && <Link to="/dashboard/projects?new=1" className="nav-plus" title="New project" aria-label="New project"><Icon name="plus" size={14} /></Link>}</div>
         )}
         <div className="side-projects">
           {projects.map((p) => (
-            <NavLink key={p.id} to={`/app/projects/${p.id}`} className={link}>
+            <NavLink key={p.id} to={`/dashboard/projects/${p.id}`} className={link}>
               <i style={{ width: 8, height: 8, borderRadius: 3, background: `hsl(${hue(p.name)} 60% 58%)`, flex: 'none', margin: '0 5px 0 4px' }} />
               <span className="t">{p.name}</span>
             </NavLink>
@@ -76,7 +76,7 @@ export default function Shell() {
         <div className="side-bottom">
           <div className="nav-h"><span>Support</span></div>
           <a className="navlink" href="/docs" target="_blank" rel="noreferrer" title="Documentation"><Icon name="book" /><span className="nl">Documentation</span></a>
-          <NavLink to="/app/settings" className={link} title="Settings"><Icon name="cog" /><span className="nl">Settings</span></NavLink>
+          <NavLink to="/dashboard/settings" className={link} title="Settings"><Icon name="cog" /><span className="nl">Settings</span></NavLink>
 
           <div className="side-foot">
             <Menu block left up trigger={
@@ -86,7 +86,7 @@ export default function Shell() {
                 <Icon name="updown" size={14} />
               </span>
             } items={[
-              { label: 'Settings', icon: 'cog', run: () => nav('/app/settings') },
+              { label: 'Settings', icon: 'cog', run: () => nav('/dashboard/settings') },
               { label: theme === 'light' ? 'Dark mode' : 'Light mode', icon: theme === 'light' ? 'moon' : 'sun', run: () => setTheme(flipTheme()) },
               { label: 'Sign out', icon: 'out', danger: true, run: async () => { await logout(); nav('/') } },
             ]} />
@@ -101,8 +101,8 @@ export default function Shell() {
           <ThemeToggle />
           {admin && (
             <Menu trigger={<span className="btn primary sm"><Icon name="plus" size={14} /> New</span>} items={[
-              { label: 'Project', icon: 'layers', run: () => nav('/app/projects?new=1') },
-              { label: 'Invite member', icon: 'users', run: () => nav('/app/members?invite=1') },
+              { label: 'Project', icon: 'layers', run: () => nav('/dashboard/projects?new=1') },
+              { label: 'Invite member', icon: 'users', run: () => nav('/dashboard/members?invite=1') },
             ]} />
           )}
         </header>

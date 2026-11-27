@@ -21,6 +21,12 @@ function EnvAccess({ slugs, value, onChange }: { slugs: string[]; value: any; on
   )
 }
 
+// "in 7 days" reads faster than a locale date that could be day-first or month-first.
+function expiresIn(iso: string) {
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000)
+  return days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`
+}
+
 export default function Members() {
   const { orgId, org, user, reloadOrgs } = useAuth()
   const [list, setList] = useState<Row[]>([])
@@ -30,6 +36,7 @@ export default function Members() {
   const [inviting, setInviting] = useState(params.get('invite') === '1')
   const [editing, setEditing] = useState<Row | null>(null)
   const [link, setLink] = useState<Row | null>(null)
+  const [q, setQ] = useState('')
   const admin = org?.role === 'admin'
   const load = () => {
     api(`/orgs/${orgId}/members`).then(setList)
@@ -43,8 +50,9 @@ export default function Members() {
     <>
       <div className="head"><div><h1>Members</h1><p>Admins manage everything. Developers read and write secrets. Viewers are read-only. Limit anyone to specific environments.</p></div>
         {admin && <button className="btn primary" onClick={() => setInviting(true)}><Icon name="plus" size={15} /> Invite member</button>}</div>
+      {list.length > 5 && <div className="filters"><div className="search"><Icon name="search" size={15} /><input className="input" placeholder="Search members" value={q} onChange={(e) => setQ(e.target.value)} /></div></div>}
       <div className="scroll-x"><table className="table"><thead><tr><th>Member</th><th style={{ width: 170 }}>Role</th><th>Environment access</th><th style={{ width: 130 }}>Joined</th><th style={{ width: 56 }} /></tr></thead><tbody>
-        {list.map((m) => {
+        {list.filter((m) => !q.trim() || `${m.name} ${m.email} ${m.role}`.toLowerCase().includes(q.trim().toLowerCase())).map((m) => {
           const overrides = Object.entries<string>(m.env_roles || {})
           const self = m.id === user?.id
           return (
@@ -84,7 +92,7 @@ export default function Members() {
                 <td className="c-main">{i.email}</td>
                 <td className="role">{i.role}</td>
                 <td className="dim">{i.invited_by}</td>
-                <td>{i.expired ? <span className="state bad"><i />Expired</span> : <span className="dim">{new Date(i.expires_at).toLocaleDateString()}</span>}</td>
+                <td>{i.expired ? <span className="state bad"><i />Expired</span> : <span className="dim" title={new Date(i.expires_at).toLocaleString()}>{expiresIn(i.expires_at)}</span>}</td>
                 <td><RowMenu items={[{ label: 'Revoke invitation', icon: 'trash', danger: true, run: () => act(() => api(`/orgs/${orgId}/invites/${i.id}`, { method: 'DELETE' })) }]} /></td>
               </tr>))}
           </tbody></table><TableFoot>{plural(invites.length, 'pending invitation')}</TableFoot></div>
