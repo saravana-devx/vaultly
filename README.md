@@ -1,5 +1,7 @@
 # Vaultly
 
+[![CI](https://github.com/saravana-devx/vaultly/actions/workflows/ci.yml/badge.svg)](https://github.com/saravana-devx/vaultly/actions/workflows/ci.yml)
+
 Self-hosted secrets management: encrypted storage, environments and folders, versioning, access control, audit log, CLI, and a React dashboard.
 
 **Stack:** Go + Gin · PostgreSQL · Redis · Kafka · OpenBao · React (Vite) · everything runs in Docker.
