@@ -6,6 +6,16 @@ Self-hosted secrets management: encrypted storage, environments and folders, ver
 
 **Stack:** Go + Gin · PostgreSQL · Redis · Kafka · OpenBao · React (Vite) · everything runs in Docker.
 
+**How it's built and why:** [docs/DESIGN.md](docs/DESIGN.md) covers the architecture, the threat model, the encryption design and its trade-offs.
+
+## Try it in one command
+
+```bash
+make demo        # only needs Docker: creates .env, starts the stack, seeds a demo workspace
+```
+
+Then open http://localhost:3000 and sign in as `maya@demo.vaultly.dev` (admin) or `sam@demo.vaultly.dev` (developer), password `demo-password-2026`. Sam has a production change waiting for Maya's approval, and the **Compare** tab shows drift between environments.
+
 ## Run
 
 ```bash
@@ -40,9 +50,11 @@ Caddy gets a Let's Encrypt certificate automatically and only ports 80/443 are p
 
 ## Features
 
-**Core** — register/login (JWT + rotating refresh cookie), workspaces, projects, environments, folders (paths), encrypted secrets, versions and rollback, rotation, `.env` import/export, service tokens, audit log (via Kafka), CLI, dashboard.
+**Core** — register/login (JWT + rotating refresh cookie) with optional **two-factor sign-in** (TOTP, single-use recovery codes, replay protection), workspaces, projects, environments, folders (paths), encrypted secrets, versions and rollback, rotation, `.env` import/export, service tokens, audit log (via Kafka), CLI, dashboard.
 
 **Security** — sliding-window rate limiting (Redis/Lua) · secret **expiry** (expired secrets stop being served and raise `secret.expired`) · service-token **IP allowlists** (denials are audited) · bcrypt, hashed tokens, single-use rotating refresh tokens.
+
+**Review** — **protected environments**: a developer's change becomes a **change request** that someone else must approve (stale requests are refused, never overwrite newer values) · **compare environments**: missing keys and differing values across dev/staging/prod, without revealing any value.
 
 **Teams** — **email invites** (SMTP, link also shown to the admin) · **per-environment roles** (`none` / `viewer` / `developer`, overriding the workspace role per environment name) · **personal access tokens** (act as the user, same roles, cannot mint more tokens).
 
@@ -59,12 +71,15 @@ The root key lives in **OpenBao** (Transit engine) and wraps a random per-projec
 ## CLI
 
 ```bash
-export VAULTLY_TOKEN=vst_...  VAULTLY_URL=http://localhost:8080
-vaultly pull > .env                 # or: --format shell|json
-vaultly run -- node server.js       # inject secrets as env vars
-vaultly set KEY value               # write-enabled token
-curl -XPOST -H "Authorization: Bearer $VAULTLY_TOKEN" $VAULTLY_URL/api/v1/dynamic/readonly-db/lease
+vaultly login --url http://localhost:8080   # paste a service token (hidden); stored 0600 in ~/.config/vaultly
+vaultly setup --path /app                   # link this folder via .vaultly.json (no secrets, safe to commit)
+vaultly run -- node server.js               # inject secrets as env vars
+vaultly pull > .env                         # or: --format shell|json
+vaultly set KEY value                       # write-enabled token
+vaultly whoami                              # token scope and where settings came from
 ```
+
+In CI, set `VAULTLY_TOKEN` and `VAULTLY_URL` instead of logging in. If the server is unreachable, `run`/`pull` use an encrypted copy of the last fetch (key derived from the token, 24h max, never after a 401/403). Details in [docs/DESIGN.md](docs/DESIGN.md#10-cli-and-the-offline-cache).
 
 ## Notes and limits
 

@@ -53,7 +53,7 @@ Operations
   - Encrypted backup and restore of a whole workspace (passphrase protected)
 
 NOT IMPLEMENTED (see 12_REMAINING_WORK.txt)
-  Multi-region / HA, SSO, password reset, MFA, E2EE, PAM, certificates.
+  Multi-region / HA, SSO, password reset, E2EE, PAM, certificates.
 
 TECH STACK
 ----------

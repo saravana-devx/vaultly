@@ -67,7 +67,7 @@ KNOWN LIMITATIONS (be upfront about these)
   - The demo OpenBao unseals with one key kept on a Docker volume, no TLS, single node (dev setup).
   - If the OpenBao data is lost, all secrets are unrecoverable - back it up (file 13).
   - Unwrapped project keys are cached in memory for ~60 s.
-  - No MFA/SSO/password-reset/email verification.
+  - No SSO/password-reset/email verification. (TOTP two-factor sign-in exists; see DESIGN.md section 5.)
   - The server decrypts secrets (it is not zero-knowledge / end-to-end encrypted).
   - JWT secret rotation invalidates sessions but is not automated.
   - The JWT access token contains the user's email; webhook payloads and invitation emails also

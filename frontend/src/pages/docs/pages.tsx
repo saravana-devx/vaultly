@@ -72,6 +72,13 @@ vaultly run -- node server.js    # or inject the secrets into one process`}</Cmd
         <h2>Inviting people</h2>
         <p>In <em>Members</em>, choose <em>Invite member</em>, enter an email address and a role, and optionally set per-environment access. Vaultly emails a link and also shows it to you so you can share it directly. The link works once, for that email address, for 7 days. You can revoke a pending invitation at any time.</p>
         <p>Someone who already has an account signs in and accepts. Someone new creates an account from the same link.</p>
+        <h2>Two-factor sign-in</h2>
+        <p>In <em>Settings</em>, anyone can turn on two-factor sign-in. Scan the QR code with an authenticator app (1Password, Google Authenticator, Authy…) and confirm with a code. From then on, signing in asks for a 6-digit code after the password.</p>
+        <ul className="doc-list">
+          <li><b>Recovery codes.</b> Turning it on shows 10 one-time codes. Each one signs you in once if you lose your phone. You can create a new set at any time, which cancels the old one.</li>
+          <li><b>Codes can't be reused.</b> A code that was accepted once is refused afterwards, even inside its 30-second window. After 5 wrong codes, you must enter your password again.</li>
+          <li><b>Turning it off</b> needs your password and a current code, so a stolen session alone can't remove it. Personal tokens can't change these settings.</li>
+        </ul>
       </>
     ),
   },
@@ -101,6 +108,17 @@ vaultly run -- node server.js    # or inject the secrets into one process`}</Cmd
         <p>Add tags to group secrets, and use the search box to look across folders and environments. Search only returns what you are allowed to read.</p>
         <h2>Import and export</h2>
         <p><em>Import</em> takes the text of a <code>.env</code> file and creates or updates the secrets in it. <em>Export</em> downloads the current folder as <code>.env</code>, shell exports or JSON. Exports are audited and rate limited.</p>
+        <h2>Comparing environments</h2>
+        <p>The <em>Compare</em> tab lines up environments key by key and shows which keys are <b>missing</b> somewhere and which have <b>different values</b>, the drift that usually breaks a deploy. Values are compared on the server and never sent: environments with the same letter have the same value. It only includes environments you can read.</p>
+        <h2>Protected environments and approvals</h2>
+        <p>An admin can mark an environment as <b>protected</b> in the project's <em>Settings</em>. After that, when a developer saves or deletes a secret there, Vaultly opens a <b>change request</b> instead of changing it. Apps keep getting the old value until someone else approves.</p>
+        <ul className="doc-list">
+          <li>Requests are listed under <em>Changes</em>. A reviewer sees the current and proposed values side by side and can approve, with an optional note, or reject.</li>
+          <li>You can't approve your own change. Approving needs write access to that environment. The author can cancel a request while it is open.</li>
+          <li>If the secret changed after the request was opened, the request is marked <b>stale</b> and can't be applied, so a newer value is never overwritten by accident.</li>
+          <li>An applied change gets a normal new version under the author's name, and the usual audit events and webhooks fire.</li>
+          <li>Admins write directly. Rotate, restore and import are turned off for developers on a protected environment, since each value has to be reviewed.</li>
+        </ul>
       </>
     ),
   },
@@ -225,8 +243,9 @@ function verify(secret, timestamp, rawBody, header) {
         <p>Each entry has the time, who did it (a person or a token), what happened, the resource, the project and the IP address. Actor, resource and IP are stored encrypted. Events for a project that has since been deleted are shown as <em>Deleted project</em>.</p>
         <h2>Event types</h2>
         <Table head={['Group', 'Events']} rows={[
-          [<b key="a">Sign-in</b>, <code key="a2">auth.login, auth.register</code>],
-          [<b key="s">Secrets</b>, <code key="s2">secret.create, update, delete, read, rotate, rollback, import, export, fetch, expired</code>],
+          [<b key="a">Sign-in</b>, <code key="a2">auth.login, auth.register, auth.mfa_enabled, auth.mfa_disabled, auth.mfa_recovery_regenerated</code>],
+          [<b key="s">Secrets</b>, <code key="s2">secret.create, update, delete, read, rotate, rollback, import, export, fetch, expired, compare</code>],
+          [<b key="c">Change requests</b>, <code key="c2">change.request, view, approve, reject, cancel; environment.protect, environment.unprotect</code>],
           [<b key="t">Tokens</b>, <code key="t2">token.create, token.revoke, token.denied</code>],
           [<b key="m">Members</b>, <code key="m2">member.add, remove, role_change, invite, invite_revoke, join, env_roles</code>],
           [<b key="p">Projects</b>, <code key="p2">project.create, project.delete, environment.create, environment.delete</code>],
@@ -240,28 +259,40 @@ function verify(secret, timestamp, rawBody, header) {
   },
   {
     slug: 'cli', title: 'CLI', group: 'Reference',
-    summary: 'Pull secrets into a file or a process from a terminal or CI.',
-    keywords: 'command line vaultly pull run set',
+    summary: 'Log in once, link a folder, and run apps with their secrets, even offline.',
+    keywords: 'command line vaultly login setup pull run set whoami offline cache',
     body: () => (
       <>
         <p>One small binary that talks to the machine API with a service token.</p>
         <Cmd>{`cd backend && go build -o vaultly ./cmd/vaultly
 # or, with the Docker setup:  docker compose exec backend vaultly pull`}</Cmd>
-        <p>Set the address and token in the environment:</p>
-        <Cmd>{`export VAULTLY_URL=https://your-vaultly-host
-export VAULTLY_TOKEN=vst_xxxxxxxxxxxx`}</Cmd>
+        <h2>Log in and link a folder</h2>
+        <Cmd>{`vaultly login --url https://your-vaultly-host   # paste the token; input is hidden
+vaultly setup --path /app                         # in your project folder
+vaultly whoami                                     # check the scope and where settings come from`}</Cmd>
+        <p><code>login</code> checks the token and stores it in <code>~/.config/vaultly/credentials.json</code>, readable only by you. Use <code>--profile</code> to keep several tokens. <code>setup</code> writes a <code>.vaultly.json</code> that names the profile and folder. It holds no secrets, so you can commit it, and every teammate logs in with their own token.</p>
+        <p>In CI, skip both and set <code>VAULTLY_URL</code> and <code>VAULTLY_TOKEN</code>. They override any stored profile.</p>
         <h2>Commands</h2>
         <Table head={['Command', 'What it does']} rows={[
-          [<code key="1">vaultly pull [--path /p] [--format dotenv|shell|json]</code>, "Print the secrets of the token's environment, folders included."],
-          [<code key="2">vaultly run [--path /p] -- cmd</code>, <>Start <code>cmd</code> with the secrets as environment variables.</>],
-          [<code key="3">vaultly set KEY VALUE [--path /p]</code>, 'Write one secret. The token must allow writes.'],
+          [<code key="1">vaultly pull [--format dotenv|shell|json]</code>, "Print the secrets of the token's environment, folders included."],
+          [<code key="2">vaultly run -- cmd</code>, <>Start <code>cmd</code> with the secrets as environment variables.</>],
+          [<code key="3">vaultly set KEY VALUE</code>, 'Write one secret. The token must allow writes.'],
+          [<code key="4">vaultly whoami</code>, "Show the token's name, environment, folder and access."],
+          [<code key="5">vaultly logout</code>, 'Forget a profile and clear the offline cache.'],
         ]} />
-        <p>The folder defaults to the one the token is scoped to, and a token can never read outside it.</p>
+        <p>All of them take <code>--path /p</code> and <code>--profile name</code>. The folder defaults to the one in <code>.vaultly.json</code>, then to the token's own, and a token can never read outside its scope.</p>
+        <h2>When the server is down</h2>
+        <p>Each successful <code>pull</code> or <code>run</code> keeps an encrypted copy of what it fetched. If the server can't be reached, or answers with a server error, the CLI uses that copy and says so, so a deploy or a laptop on a train still starts.</p>
+        <ul className="doc-list">
+          <li>The copy is encrypted with a key derived from the token. Copied anywhere without the token, it can't be read.</li>
+          <li>It is <b>never</b> used when the server says the token is invalid, revoked or out of scope. A revoked token stops working at once, and its copy is deleted.</li>
+          <li>Copies older than 24 hours are ignored. Change this with <code>--max-age 2h</code>, or turn it off with <code>--max-age 0</code> or <code>--no-cache</code>.</li>
+        </ul>
         <h2>Examples</h2>
         <Cmd>{`vaultly pull > .env                       # .env file
 vaultly pull --format shell | source /dev/stdin
-vaultly run -- npm start                   # no file written to disk`}</Cmd>
-        <Note kind="tip">Prefer <code>vaultly run</code> in CI and containers. The secrets exist only in that process and are never written to disk.</Note>
+vaultly run -- npm start                   # no .env file needed`}</Cmd>
+        <Note kind="tip">Prefer <code>vaultly run</code> in CI and containers. The secrets go straight into that process and no plain-text file is written. Add <code>--no-cache</code> where nothing should be written to disk at all.</Note>
       </>
     ),
   },
