@@ -9,12 +9,15 @@ GO_RUN       := docker run --rm -v "$(CURDIR)/backend":/src -v vaultly-gomod:/go
 s            ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart build ps logs psql redis test vet fmt check prod-up prod-down prod-ps prod-logs backup
+.PHONY: help demo up down restart build ps logs psql redis test vet fmt check prod-up prod-down prod-ps prod-logs backup
 
 help: ## show this list
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 ## ---- development ----------------------------------------------------------------------------
+
+demo: ## fresh clone -> running, seeded app in one command (only needs Docker)
+	@sh deploy/demo.sh
 
 up: ## start the dev stack (builds images, waits for the backend)
 	$(COMPOSE) up -d --build

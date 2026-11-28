@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,10 +15,16 @@ import (
 	"vaultly/internal/bootstrap"
 	"vaultly/internal/config"
 	"vaultly/internal/db"
+	"vaultly/internal/demo"
 	"vaultly/internal/pii"
 )
 
 func main() {
+	// seed-demo only talks to the HTTP API, so it needs no config, database or keys.
+	if len(os.Args) > 1 && os.Args[1] == "seed-demo" {
+		seedDemo()
+		return
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
@@ -72,4 +79,21 @@ func main() {
 	if err := app.Run(ctx, log.Printf); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func seedDemo() {
+	base := os.Getenv("DEMO_API_URL")
+	if base == "" {
+		base = "http://127.0.0.1:8080"
+	}
+	res, err := demo.Seed(base, func(f string, a ...any) { log.Printf("demo: "+f, a...) })
+	if err != nil {
+		log.Fatalf("demo: %v", err)
+	}
+	if res.AlreadySeeded {
+		log.Println("demo: already seeded, nothing changed")
+		return
+	}
+	// The token is printed once, like in the UI: it is only for trying the CLI locally.
+	fmt.Printf("DEMO_SERVICE_TOKEN=%s\n", res.ServiceToken)
 }
