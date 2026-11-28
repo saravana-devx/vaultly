@@ -17,6 +17,11 @@ type fakeRepo struct {
 	member    bool
 	overrides map[string]string // env slug -> role
 	envs      []Env
+	protected map[uuid.UUID]bool
+}
+
+func (f *fakeRepo) EnvProtected(_ context.Context, id uuid.UUID) (bool, error) {
+	return f.protected[id], nil
 }
 
 func (f *fakeRepo) OrgRole(context.Context, uuid.UUID, uuid.UUID) (string, error) {
@@ -175,6 +180,26 @@ func TestValidRoles(t *testing.T) {
 	for _, r := range []string{RoleNone, RoleViewer, RoleDeveloper} {
 		if !ValidEnvRole(r) {
 			t.Errorf("%s should be a valid env role", r)
+		}
+	}
+}
+
+func TestNeedsApproval(t *testing.T) {
+	prod, dev := uuid.New(), uuid.New()
+	for _, c := range []struct {
+		role string
+		env  uuid.UUID
+		want bool
+	}{
+		{RoleDeveloper, prod, true},
+		{RoleDeveloper, dev, false},
+		{RoleViewer, prod, true},
+		{RoleAdmin, prod, false}, // admins write directly, as they can already change protection
+	} {
+		s := newSvc(&fakeRepo{member: true, orgRole: c.role, protected: map[uuid.UUID]bool{prod: true}})
+		got, err := s.NeedsApproval(ctx, &Project{Role: c.role}, c.env)
+		if err != nil || got != c.want {
+			t.Errorf("%s on %v: got %v, %v; want %v", c.role, c.env == prod, got, err, c.want)
 		}
 	}
 }

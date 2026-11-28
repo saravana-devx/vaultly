@@ -180,6 +180,15 @@ func (r *Repository) Upsert(ctx context.Context, w Write) (Secret, bool, error) 
 		if err != nil && exists {
 			return err
 		}
+		if w.CheckVersion {
+			cur := 0
+			if exists {
+				cur = version
+			}
+			if cur != w.ExpectVersion {
+				return ErrStaleChange
+			}
+		}
 		if exists && w.KeepComment {
 			w.Comment = r.box.OpenName(fComment, commentRaw)
 		}
@@ -226,6 +235,25 @@ func (r *Repository) Upsert(ctx context.Context, w Write) (Secret, bool, error) 
 func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM secrets WHERE id=$1`, id)
 	return err
+}
+
+// DeleteAt deletes the secret at (env, path, key) only if it is still at version; else ErrStaleChange.
+func (r *Repository) DeleteAt(ctx context.Context, envID uuid.UUID, path, key string, version int) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM secrets WHERE env_id=$1 AND lookup_hash=$2 AND version=$3`, envID, r.lookupHash(path, key), version)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrStaleChange
+	}
+	return err
+}
+
+// VersionAt is the current version of (env, path, key), or 0 if it doesn't exist.
+func (r *Repository) VersionAt(ctx context.Context, envID uuid.UUID, path, key string) (int, error) {
+	var v int
+	err := r.db.QueryRow(ctx, `SELECT version FROM secrets WHERE env_id=$1 AND lookup_hash=$2`, envID, r.lookupHash(path, key)).Scan(&v)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return v, err
 }
 
 func (r *Repository) Versions(ctx context.Context, id uuid.UUID) ([]VersionInfo, error) {

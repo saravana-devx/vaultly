@@ -19,6 +19,7 @@ import (
 type ProjectRepository interface {
 	ListByOrg(ctx context.Context, org uuid.UUID) ([]Summary, error)
 	EnvsFor(ctx context.Context, projectIDs []uuid.UUID) (map[uuid.UUID][]Env, error)
+	SetEnvProtected(ctx context.Context, project, env uuid.UUID, on bool) (string, error)
 	Create(ctx context.Context, org uuid.UUID, name string, wrappedKey []byte) (uuid.UUID, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	CreateEnv(ctx context.Context, project uuid.UUID, name, slug string) (Env, error)
@@ -182,5 +183,23 @@ func (s *Service) DeleteEnv(ctx context.Context, a principal.Actor, id, env uuid
 		return err
 	}
 	s.audit.Record(ctx, a, p.OrgID, &id, "environment.delete", envSlug, nil)
+	return nil
+}
+
+// SetEnvProtected turns change approval on or off for one environment (admins only).
+func (s *Service) SetEnvProtected(ctx context.Context, a principal.Actor, id, env uuid.UUID, on bool) error {
+	p, err := s.access.Project(ctx, a.UserID, id, access.RoleAdmin)
+	if err != nil {
+		return err
+	}
+	envSlug, err := s.repo.SetEnvProtected(ctx, id, env, on)
+	if err != nil {
+		return err
+	}
+	action := "environment.unprotect"
+	if on {
+		action = "environment.protect"
+	}
+	s.audit.Record(ctx, a, p.OrgID, &id, action, envSlug, nil)
 	return nil
 }

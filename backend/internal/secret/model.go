@@ -39,6 +39,10 @@ type Write struct {
 	Tags             *[]string
 	Expires          *time.Time
 	ClearExpiry      bool
+	// CheckVersion makes the write conditional: it fails with ErrStaleChange unless the secret's
+	// current version is ExpectVersion (0 = must not exist yet). Used when applying change requests.
+	CheckVersion  bool
+	ExpectVersion int
 }
 
 type Listing struct {

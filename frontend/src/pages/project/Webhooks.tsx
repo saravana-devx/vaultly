@@ -8,7 +8,7 @@ import { EmptyRow, Rel, RowMenu, StateDot, TableFoot, plural } from '../../compo
 
 const EVENT_GROUPS = [
   ['*', 'Everything'], ['secret.*', 'Secret changes and reads'], ['secret.expired', 'Secret expired'], ['token.*', 'Service token events'],
-  ['dynamic.*', 'Dynamic credentials'], ['integration.*', 'Integration syncs'], ['webhook.*', 'Webhook changes'],
+  ['change.*', 'Change requests'], ['dynamic.*', 'Dynamic credentials'], ['integration.*', 'Integration syncs'], ['webhook.*', 'Webhook changes'],
 ]
 
 export default function Webhooks({ project }: { project: Row }) {

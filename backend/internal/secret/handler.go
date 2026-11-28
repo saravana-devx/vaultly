@@ -1,6 +1,8 @@
 package secret
 
 import (
+	"context"
+	"github.com/google/uuid"
 	"net/http"
 	"strings"
 
@@ -72,9 +74,13 @@ func (h *Handler) Put(c *gin.Context) {
 	}
 	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
 	defer cancel()
-	out, err := h.svc.Put(ctx, principal.From(c), pid, &body)
+	out, cr, err := h.svc.Put(ctx, principal.From(c), pid, &body)
 	if err != nil {
 		httpx.Fail(c, err)
+		return
+	}
+	if cr != nil {
+		httpx.Success(c, http.StatusAccepted, MsgChangeRequested, gin.H{"change_request": cr})
 		return
 	}
 	httpx.Success(c, http.StatusOK, MsgSecretSaved, out)
@@ -88,8 +94,13 @@ func (h *Handler) Delete(c *gin.Context) {
 	}
 	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
 	defer cancel()
-	if err := h.svc.Delete(ctx, principal.From(c), pid, sid); err != nil {
+	cr, err := h.svc.Delete(ctx, principal.From(c), pid, sid)
+	if err != nil {
 		httpx.Fail(c, err)
+		return
+	}
+	if cr != nil {
+		httpx.Success(c, http.StatusAccepted, MsgChangeRequested, gin.H{"change_request": cr})
 		return
 	}
 	httpx.Success(c, http.StatusOK, MsgSecretDeleted, nil)
@@ -223,4 +234,87 @@ func respond(c *gin.Context, pairs []Pair) {
 	default:
 		httpx.Success(c, http.StatusOK, MsgExported, gin.H{"secrets": ToMap(pairs)})
 	}
+}
+
+func (h *Handler) Compare(c *gin.Context) {
+	pid, ok := httpx.UUIDParam(c, "pid")
+	if !ok {
+		return
+	}
+	var envs []string
+	for _, e := range strings.Split(c.Query("envs"), ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			envs = append(envs, e)
+		}
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	out, err := h.svc.Compare(ctx, principal.From(c), pid, envs, c.DefaultQuery("path", "/"))
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgCompared, out)
+}
+
+func (h *Handler) Changes(c *gin.Context) {
+	pid, ok := httpx.UUIDParam(c, "pid")
+	if !ok {
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	out, err := h.svc.Changes(ctx, principal.From(c), pid, c.Query("status"))
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgChangesListed, out)
+}
+
+func (h *Handler) Change(c *gin.Context) {
+	pid, ok := httpx.UUIDParam(c, "pid")
+	cid, ok2 := httpx.UUIDParam(c, "cid")
+	if !ok || !ok2 {
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	out, err := h.svc.Change(ctx, principal.From(c), pid, cid)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgChangeFetched, out)
+}
+
+func (h *Handler) decide(c *gin.Context, msg string, fn func(ctx context.Context, a principal.Actor, pid, cid uuid.UUID, note string) (*ChangeRequest, error)) {
+	pid, ok := httpx.UUIDParam(c, "pid")
+	cid, ok2 := httpx.UUIDParam(c, "cid")
+	if !ok || !ok2 {
+		return
+	}
+	var body DecideRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			httpx.BindError(c, err)
+			return
+		}
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	out, err := fn(ctx, principal.From(c), pid, cid, body.Note)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, msg, out)
+}
+
+func (h *Handler) Approve(c *gin.Context) { h.decide(c, MsgChangeApproved, h.svc.Approve) }
+func (h *Handler) Reject(c *gin.Context)  { h.decide(c, MsgChangeRejected, h.svc.Reject) }
+func (h *Handler) CancelChange(c *gin.Context) {
+	h.decide(c, MsgChangeCancelled, func(ctx context.Context, a principal.Actor, pid, cid uuid.UUID, _ string) (*ChangeRequest, error) {
+		return h.svc.CancelChange(ctx, a, pid, cid)
+	})
 }

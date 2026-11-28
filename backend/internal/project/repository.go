@@ -47,7 +47,7 @@ func (r *Repository) ListByOrg(ctx context.Context, org uuid.UUID) ([]Summary, e
 }
 
 func (r *Repository) EnvsFor(ctx context.Context, projectIDs []uuid.UUID) (map[uuid.UUID][]Env, error) {
-	rows, err := r.db.Query(ctx, `SELECT project_id,id,name,slug FROM environments WHERE project_id = ANY($1) ORDER BY position, name`, projectIDs)
+	rows, err := r.db.Query(ctx, `SELECT project_id,id,name,slug,protected FROM environments WHERE project_id = ANY($1) ORDER BY position, name`, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (r *Repository) EnvsFor(ctx context.Context, projectIDs []uuid.UUID) (map[u
 	for rows.Next() {
 		var pid uuid.UUID
 		var e Env
-		if err := rows.Scan(&pid, &e.ID, &e.Name, &e.Slug); err != nil {
+		if err := rows.Scan(&pid, &e.ID, &e.Name, &e.Slug, &e.Protected); err != nil {
 			return nil, err
 		}
 		out[pid] = append(out[pid], r.openEnv(e))
@@ -101,6 +101,15 @@ func (r *Repository) CreateEnv(ctx context.Context, project uuid.UUID, name, slu
 func (r *Repository) DeleteEnv(ctx context.Context, project, env uuid.UUID) (string, error) {
 	var slug string
 	err := r.db.QueryRow(ctx, `DELETE FROM environments WHERE id=$1 AND project_id=$2 RETURNING slug`, env, project).Scan(&slug)
+	if dberr.IsNoRows(err) {
+		return "", ErrEnvNotFound
+	}
+	return r.box.OpenName("environments.slug", slug), err
+}
+
+func (r *Repository) SetEnvProtected(ctx context.Context, project, env uuid.UUID, on bool) (string, error) {
+	var slug string
+	err := r.db.QueryRow(ctx, `UPDATE environments SET protected=$3 WHERE id=$1 AND project_id=$2 RETURNING slug`, env, project, on).Scan(&slug)
 	if dberr.IsNoRows(err) {
 		return "", ErrEnvNotFound
 	}

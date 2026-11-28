@@ -31,6 +31,7 @@ type SecretRepository interface {
 	Live(ctx context.Context, envID uuid.UUID, path string, recursive bool) ([]LiveRow, error)
 	Lookup(ctx context.Context, envID uuid.UUID, path, key string) ([]byte, error)
 	MarkExpired(ctx context.Context) ([]Expired, error)
+	ChangeRepository
 }
 
 type Service struct {
@@ -216,39 +217,48 @@ func (s *Service) Get(ctx context.Context, a principal.Actor, projectID, id uuid
 	return &sec, nil
 }
 
-func (s *Service) Put(ctx context.Context, a principal.Actor, projectID uuid.UUID, req *PutRequest) (*Secret, error) {
+// Put writes a secret, or, on a protected environment, opens a change request instead
+// (exactly one of the two results is non-nil).
+func (s *Service) Put(ctx context.Context, a principal.Actor, projectID uuid.UUID, req *PutRequest) (*Secret, *ChangeRequest, error) {
 	sc, err := s.open(ctx, a, projectID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	path, ok := pathutil.Norm(req.Path)
 	if !ok || !keyRe.MatchString(req.Key) {
-		return nil, ErrInvalidKeyPath
+		return nil, nil, ErrInvalidKeyPath
 	}
 	if len(req.Value) > maxValueLen {
-		return nil, ErrValueTooLarge
+		return nil, nil, ErrValueTooLarge
 	}
 	if req.ExpiresAt != nil && req.ExpiresAt.Before(time.Now()) {
-		return nil, ErrExpiryPast
+		return nil, nil, ErrExpiryPast
 	}
 	if req.Tags != nil {
 		t, ok := normTags(*req.Tags)
 		if !ok {
-			return nil, ErrInvalidTags
+			return nil, nil, ErrInvalidTags
 		}
 		req.Tags = &t
 	}
 	if err := s.need(ctx, sc, req.Env, access.RoleDeveloper); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	envID, err := s.access.EnvID(ctx, projectID, req.Env)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if gated, err := s.gated(ctx, sc, envID); err != nil {
+		return nil, nil, err
+	} else if gated {
+		// Tags and expiry are metadata an admin can set afterwards; the request carries the value.
+		cr, err := s.propose(ctx, sc, req.Env, envID, path, req.Key, "set", req.Value, req.Comment)
+		return nil, cr, err
 	}
 	sec, created, err := s.write(ctx, Write{ProjectID: projectID, EnvID: envID, Path: path, Key: req.Key, Comment: req.Comment,
 		Actor: s.pii.Label(a.Label()), Tags: req.Tags, Expires: req.ExpiresAt, ClearExpiry: req.ClearExpiry}, req.Value)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sec.Env = req.Env
 	action := "secret.update"
@@ -256,18 +266,43 @@ func (s *Service) Put(ctx context.Context, a principal.Actor, projectID uuid.UUI
 		action = "secret.create"
 	}
 	s.audit.Record(ctx, a, sc.p.OrgID, &projectID, action, pathutil.Join(path, req.Key), map[string]any{"env": req.Env, "version": sec.Version})
-	return &sec, nil
+	return &sec, nil, nil
 }
 
-func (s *Service) Delete(ctx context.Context, a principal.Actor, projectID, id uuid.UUID) error {
+// Delete removes a secret, or opens a change request for it on a protected environment.
+func (s *Service) Delete(ctx context.Context, a principal.Actor, projectID, id uuid.UUID) (*ChangeRequest, error) {
 	sc, st, err := s.load(ctx, a, projectID, id, access.RoleDeveloper)
+	if err != nil {
+		return nil, err
+	}
+	envID, err := s.access.EnvID(ctx, projectID, st.Env)
+	if err != nil {
+		return nil, err
+	}
+	if gated, err := s.gated(ctx, sc, envID); err != nil {
+		return nil, err
+	} else if gated {
+		return s.propose(ctx, sc, st.Env, envID, st.Path, st.Key, "delete", "", "")
+	}
+	if err := s.repo.Delete(ctx, st.ID); err != nil {
+		return nil, err
+	}
+	s.audit.Record(ctx, a, sc.p.OrgID, &projectID, "secret.delete", pathutil.Join(st.Path, st.Key), map[string]any{"env": st.Env})
+	return nil, nil
+}
+
+// direct refuses bulk or generated writes on a protected environment for non-admins; those go
+// through the editor as change requests so a reviewer sees each value.
+func (s *Service) direct(ctx context.Context, sc *scope, env string) error {
+	envID, err := s.access.EnvID(ctx, sc.p.ID, env)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.Delete(ctx, st.ID); err != nil {
+	if gated, err := s.gated(ctx, sc, envID); err != nil {
 		return err
+	} else if gated {
+		return ErrProtectedEnv
 	}
-	s.audit.Record(ctx, a, sc.p.OrgID, &projectID, "secret.delete", pathutil.Join(st.Path, st.Key), map[string]any{"env": st.Env})
 	return nil
 }
 
@@ -286,6 +321,9 @@ func (s *Service) Versions(ctx context.Context, a principal.Actor, projectID, id
 func (s *Service) Rollback(ctx context.Context, a principal.Actor, projectID, id uuid.UUID, req *RollbackRequest) (*Secret, error) {
 	sc, st, err := s.load(ctx, a, projectID, id, access.RoleDeveloper)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.direct(ctx, sc, st.Env); err != nil {
 		return nil, err
 	}
 	ct, err := s.repo.VersionCiphertext(ctx, st.ID, req.Version)
@@ -308,6 +346,9 @@ func (s *Service) Rollback(ctx context.Context, a principal.Actor, projectID, id
 func (s *Service) Rotate(ctx context.Context, a principal.Actor, projectID, id uuid.UUID, req *RotateRequest) (*Secret, error) {
 	sc, st, err := s.load(ctx, a, projectID, id, access.RoleDeveloper)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.direct(ctx, sc, st.Env); err != nil {
 		return nil, err
 	}
 	length := req.Length
@@ -355,6 +396,9 @@ func (s *Service) Import(ctx context.Context, a principal.Actor, projectID uuid.
 		return nil, ErrInvalidEnvPath
 	}
 	if err := s.need(ctx, sc, req.Env, access.RoleDeveloper); err != nil {
+		return nil, err
+	}
+	if err := s.direct(ctx, sc, req.Env); err != nil {
 		return nil, err
 	}
 	pairs := parseDotenv(req.Content)

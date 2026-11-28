@@ -7,9 +7,10 @@ import (
 )
 
 type Env struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
-	Slug string    `json:"slug"`
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	Protected bool      `json:"protected"` // changes by non-admins need approval
 }
 
 type Summary struct {

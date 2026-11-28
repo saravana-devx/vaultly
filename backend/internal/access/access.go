@@ -54,6 +54,7 @@ type Repository interface {
 	EnvOverride(ctx context.Context, orgID, userID uuid.UUID, slug string) (role string, found bool, err error)
 	Envs(ctx context.Context, projectID uuid.UUID) ([]Env, error)
 	EnvID(ctx context.Context, projectID uuid.UUID, slug string) (uuid.UUID, error)
+	EnvProtected(ctx context.Context, envID uuid.UUID) (bool, error)
 }
 
 // Namer opens names that are stored encrypted.
@@ -136,8 +137,22 @@ func (s *Service) ReadableEnvs(ctx context.Context, p *Project, userID uuid.UUID
 	return out, nil
 }
 
+// Envs lists a project's environments in display order (callers check access themselves).
+func (s *Service) Envs(ctx context.Context, projectID uuid.UUID) ([]Env, error) {
+	return s.repo.Envs(ctx, projectID)
+}
+
 func (s *Service) EnvID(ctx context.Context, projectID uuid.UUID, slug string) (uuid.UUID, error) {
 	return s.repo.EnvID(ctx, projectID, slug)
+}
+
+// NeedsApproval reports whether a change by this caller to env must go through a change request:
+// the environment is protected and the caller is not a workspace admin.
+func (s *Service) NeedsApproval(ctx context.Context, p *Project, envID uuid.UUID) (bool, error) {
+	if p.Role == RoleAdmin {
+		return false, nil
+	}
+	return s.repo.EnvProtected(ctx, envID)
 }
 
 // Environment names and slugs are stored sealed; slug_hash is what lookups compare.
@@ -208,6 +223,15 @@ func (r *Repo) EnvID(ctx context.Context, projectID uuid.UUID, slug string) (uui
 		return uuid.Nil, apperr.NotFound("environment not found")
 	}
 	return id, err
+}
+
+func (r *Repo) EnvProtected(ctx context.Context, envID uuid.UUID) (bool, error) {
+	var on bool
+	err := r.db.QueryRow(ctx, `SELECT protected FROM environments WHERE id=$1`, envID).Scan(&on)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, apperr.NotFound("environment not found")
+	}
+	return on, err
 }
 
 var _ Repository = (*Repo)(nil)

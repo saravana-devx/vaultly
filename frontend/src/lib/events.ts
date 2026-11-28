@@ -12,6 +12,11 @@ const EVENTS: Record<string, [string, string]> = {
   'integration.create': ['Added integration', 'ok'], 'integration.delete': ['Removed integration', 'bad'], 'integration.sync': ['Synced integration', 'info'],
   'dynamic.create': ['Created dynamic secret', 'ok'], 'dynamic.delete': ['Deleted dynamic secret', 'bad'], 'dynamic.lease': ['Generated credentials', 'info'], 'dynamic.revoke': ['Revoked credentials', 'bad'],
   'org.backup': ['Created backup', 'info'], 'org.restore': ['Restored backup', 'warn'],
+  'auth.mfa_enabled': ['Turned on two-factor sign-in', 'ok'], 'auth.mfa_disabled': ['Turned off two-factor sign-in', 'bad'], 'auth.mfa_recovery_regenerated': ['Created new recovery codes', 'warn'],
+  'secret.compare': ['Compared environments', 'info'],
+  'change.request': ['Requested a change', 'warn'], 'change.view': ['Reviewed a change request', 'info'], 'change.approve': ['Approved a change', 'ok'],
+  'change.reject': ['Rejected a change', 'bad'], 'change.cancel': ['Cancelled a change request', 'idle'],
+  'environment.protect': ['Required approvals', 'ok'], 'environment.unprotect': ['Stopped requiring approvals', 'warn'],
 }
 
 export function describeEvent(action: string) {

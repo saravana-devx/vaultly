@@ -111,3 +111,27 @@ func (h *Handler) DeleteEnv(c *gin.Context) {
 	}
 	httpx.Success(c, http.StatusOK, MsgEnvDeleted, nil)
 }
+
+func (h *Handler) UpdateEnv(c *gin.Context) {
+	id, ok := httpx.UUIDParam(c, "pid")
+	env, ok2 := httpx.UUIDParam(c, "eid")
+	if !ok || !ok2 {
+		return
+	}
+	var body UpdateEnvRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.BindError(c, err)
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	if err := h.svc.SetEnvProtected(ctx, principal.From(c), id, env, *body.Protected); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	msg := MsgEnvUnprotected
+	if *body.Protected {
+		msg = MsgEnvProtected
+	}
+	httpx.Success(c, http.StatusOK, msg, nil)
+}

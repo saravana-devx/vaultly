@@ -10,6 +10,8 @@ import { EnvTag, StateDot, Rel, RowMenu, TableFoot, EmptyRow, plural } from '../
 import Integrations from './project/Integrations'
 import Webhooks from './project/Webhooks'
 import Dynamic from './project/Dynamic'
+import Compare from './project/Compare'
+import Changes from './project/Changes'
 
 export default function Project() {
   const { pid } = useParams()
@@ -17,9 +19,11 @@ export default function Project() {
   const [project, setProject] = useState<Row | null>(null)
   const [env, setEnv] = useState('')
   const [tab, setTab] = useState('secrets')
+  const [pending, setPending] = useState(0)
 
   const load = useCallback(() => api(`/projects/${pid}`).then((p) => { setProject(p); setEnv((e) => (p.environments.some((x: Row) => x.slug === e) ? e : p.environments[0]?.slug || '')) }), [pid])
   useEffect(() => { setProject(null); setTab('secrets'); setEnv(''); load().catch(() => nav('/dashboard/projects')) }, [load, nav])
+  useEffect(() => { api(`/projects/${pid}/changes?status=pending`).then((l) => setPending(l.length)).catch(() => {}) }, [pid, tab])
   if (!project) return <div className="spinner" style={{ margin: 40 }} />
   const admin = project.role === 'admin'
   const canWrite = project.role !== 'viewer'
@@ -33,6 +37,8 @@ export default function Project() {
       </div>
       <div className="tabs">
         <button className={`tab ${tab === 'secrets' ? 'active' : ''}`} onClick={() => setTab('secrets')}>Secrets</button>
+        {project.environments.length > 1 && <button className={`tab ${tab === 'compare' ? 'active' : ''}`} onClick={() => setTab('compare')}>Compare</button>}
+        {(pending > 0 || project.environments.some((e: Row) => e.protected)) && <button className={`tab ${tab === 'changes' ? 'active' : ''}`} onClick={() => setTab('changes')}>Changes{pending > 0 && <span className="tab-count">{pending}</span>}</button>}
         {admin && <button className={`tab ${tab === 'tokens' ? 'active' : ''}`} onClick={() => setTab('tokens')}>Service tokens</button>}
         {admin && <button className={`tab ${tab === 'dynamic' ? 'active' : ''}`} onClick={() => setTab('dynamic')}>Dynamic secrets</button>}
         {admin && <button className={`tab ${tab === 'integrations' ? 'active' : ''}`} onClick={() => setTab('integrations')}>Integrations</button>}
@@ -40,6 +46,8 @@ export default function Project() {
         {admin && <button className={`tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>}
       </div>
       {tab === 'secrets' && <Secrets project={project} env={env} setEnv={setEnv} canWrite={canWrite} />}
+      {tab === 'compare' && <Compare project={project} />}
+      {tab === 'changes' && <Changes project={project} onCount={setPending} />}
       {tab === 'tokens' && <Tokens project={project} />}
       {tab === 'dynamic' && <Dynamic project={project} />}
       {tab === 'integrations' && <Integrations project={project} />}
@@ -52,11 +60,12 @@ export default function Project() {
 const AUTO_HIDE_MS = 15000
 
 function EnvPicker({ project, env, setEnv }: { project: Row; env: string; setEnv: (...args: any[]) => void }) {
-  return <div className="seg" role="tablist">{project.environments.map((e: any) => <button key={e.id} role="tab" aria-selected={env === e.slug} className={env === e.slug ? 'on' : ''} onClick={() => setEnv(e.slug)}>{e.name}</button>)}</div>
+  return <div className="seg" role="tablist">{project.environments.map((e: any) => <button key={e.id} role="tab" aria-selected={env === e.slug} className={env === e.slug ? 'on' : ''} onClick={() => setEnv(e.slug)} title={e.protected ? 'Protected: changes need approval' : undefined}>{e.protected && <span className="lock"><Icon name="shield" size={12} /></span>}{e.name}</button>)}</div>
 }
 
 function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string; setEnv: (...args: any[]) => void; canWrite: boolean }) {
   const pid = project.id
+  const gated = project.role !== 'admin' && !!project.environments.find((e: Row) => e.slug === env)?.protected
   const [path, setPath] = useState('/')
   const [data, setData] = useState<Row | null>(null)
   const [revealed, setRevealed] = useState<Record<string, any>>({})
@@ -105,7 +114,7 @@ function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string
     setResolved((r) => ({ ...r, [s.id]: d.resolved }))
   }
   const copyVal = async (s: Row) => { const d = await api(`/projects/${pid}/secrets/${s.id}`); copy(d.value, 'Copied to clipboard') }
-  const del = async (s: Row) => { if (await ask(`Delete ${s.key}?`, { confirm: 'Delete', danger: true })) { await api(`/projects/${pid}/secrets/${s.id}`, { method: 'DELETE' }); load() } }
+  const del = async (s: Row) => { if (await ask(gated ? `Request deletion of ${s.key}? It is removed once someone else approves.` : `Delete ${s.key}?`, { confirm: gated ? 'Request deletion' : 'Delete', danger: true })) { await api(`/projects/${pid}/secrets/${s.id}`, { method: 'DELETE' }); load() } }
   const rotate = async (s: Row) => {
     if (!await ask(`Rotate ${s.key}? A new random value will replace the current one.`, { confirm: 'Rotate' })) return
     const d = await api(`/projects/${pid}/secrets/${s.id}/rotate`, { method: 'POST', body: {} })
@@ -130,7 +139,7 @@ function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string
           {parts.map((p, i) => <span key={i}><button onClick={() => setPath('/' + parts.slice(0, i + 1).join('/'))}>{p}</button>{i < parts.length - 1 && '/'}</span>)}</div>
         <div className="search"><Icon name="search" size={15} /><input className="input" placeholder="Search all secrets" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <button className="btn" onClick={exportEnv}><Icon name="download" size={15} /> Export</button>
-        {canWrite && <button className="btn" onClick={() => setImporting(true)}><Icon name="upload" size={15} /> Import</button>}
+        {canWrite && !gated && <button className="btn" onClick={() => setImporting(true)}><Icon name="upload" size={15} /> Import</button>}
         {canWrite && <button className="btn primary" onClick={() => setEdit({ key: '', value: '', comment: '' })}><Icon name="plus" size={15} /> Add secret</button>}
       </div>
       {error && <div className="alert">{error}</div>}
@@ -182,8 +191,8 @@ function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string
                   <RowMenu items={[
                     canWrite && { label: 'Edit', icon: 'pencil', run: () => editSecret(s) },
                     { label: 'Version history', icon: 'history', run: () => setHist(s) },
-                    canWrite && { label: 'Rotate value', icon: 'rotate', run: () => rotate(s) },
-                    canWrite && { label: 'Delete', icon: 'trash', danger: true, run: () => del(s) },
+                    canWrite && !gated && { label: 'Rotate value', icon: 'rotate', run: () => rotate(s) },
+                    canWrite && { label: gated ? 'Request deletion' : 'Delete', icon: 'trash', danger: true, run: () => del(s) },
                   ]} />
                 </td>
               </tr>)
@@ -192,8 +201,8 @@ function Secrets({ project, env, setEnv, canWrite }: { project: Row; env: string
         </tbody></table>
         <TableFoot>{plural(rows.length, 'secret')}{folders.length > 0 && ` · ${plural(folders.length, 'folder')}`}</TableFoot></div>
       )}
-      {edit && <SecretModal pid={pid} env={env} path={path} initial={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
-      {hist && <History pid={pid} secret={hist} canWrite={canWrite} onClose={() => setHist(null)} onChanged={load} />}
+      {edit && <SecretModal pid={pid} env={env} path={path} initial={edit} gated={gated} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
+      {hist && <History pid={pid} secret={hist} canWrite={canWrite && !gated} onClose={() => setHist(null)} onChanged={load} />}
       {importing && <ImportModal pid={pid} env={env} path={path} onClose={() => setImporting(false)} onDone={() => { setImporting(false); load() }} />}
     </>
   )
@@ -209,7 +218,7 @@ function expiryBadge(iso: string) {
 
 const toDateInput = (iso: string) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
 
-function SecretModal({ pid, env, path, initial, onClose, onSaved }: { pid: string; env: string; path: string; initial: Row; onClose: (...args: any[]) => void; onSaved: (...args: any[]) => void }) {
+function SecretModal({ pid, env, path, initial, gated, onClose, onSaved }: { pid: string; env: string; path: string; initial: Row; gated?: boolean; onClose: (...args: any[]) => void; onSaved: (...args: any[]) => void }) {
   const isEdit = !!initial.id
   const [f, setF] = useState<Row>({ key: initial.key, value: initial.value, comment: initial.comment || '', path: initial.path || path,
     tags: (initial.tags || []).join(', '), expires: toDateInput(initial.expires_at) })
@@ -225,15 +234,16 @@ function SecretModal({ pid, env, path, initial, onClose, onSaved }: { pid: strin
     <Modal title={isEdit ? `Edit ${initial.key}` : 'Add secret'} onClose={onClose}>
       <form onSubmit={submit}>
         {err && <div className="alert">{err}</div>}
+        {gated && <div className="alert warn"><b>{env}</b> is protected. Saving opens a change request, and someone else has to approve it before apps see it.</div>}
         <div className="field"><label>Key</label><input className="input mono" disabled={isEdit} autoFocus={!isEdit} required value={f.key} onChange={(e) => setF({ ...f, key: e.target.value.toUpperCase().replace(/[^A-Z0-9_.-]/g, '_') })} placeholder="DATABASE_URL" /></div>
         <div className="field"><label>Value<span className="hint">{'Reference others with ${KEY}, ${/path/KEY} or ${env:/path/KEY}'}</span></label><textarea className="input" required value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} spellCheck={false} /></div>
         <div className="field"><label>Path</label><input className="input mono" disabled={isEdit} value={f.path} onChange={(e) => setF({ ...f, path: e.target.value })} /></div>
-        <div className="field"><label>Tags<span className="hint">Comma separated</span></label><input className="input" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} placeholder="database, stripe" /></div>
-        <div className="field"><label>Expires<span className="hint">Optional — expired secrets stop being served to apps</span></label>
+        {!gated && <div className="field"><label>Tags<span className="hint">Comma separated</span></label><input className="input" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} placeholder="database, stripe" /></div>}
+        {!gated && <div className="field"><label>Expires<span className="hint">Optional — expired secrets stop being served to apps</span></label>
           <div style={{ display: 'flex', gap: 8 }}><input className="input" type="date" min={new Date().toISOString().slice(0, 10)} value={f.expires} onChange={(e) => setF({ ...f, expires: e.target.value })} />
-            {f.expires && <button type="button" className="btn" onClick={() => setF({ ...f, expires: '' })}>Clear</button>}</div></div>
+            {f.expires && <button type="button" className="btn" onClick={() => setF({ ...f, expires: '' })}>Clear</button>}</div></div>}
         <div className="field"><label>Comment<span className="hint">Optional</span></label><input className="input" value={f.comment} onChange={(e) => setF({ ...f, comment: e.target.value })} /></div>
-        <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
+        <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">{gated ? 'Request change' : 'Save'}</button></div>
       </form>
     </Modal>
   )
@@ -328,9 +338,10 @@ function Settings({ project, reload, nav }: { project: Row; reload: (...args: an
     <>
       <div className="sect" style={{ marginTop: 28 }}><h2>Environments</h2></div>
       {err && <div className="alert">{err}</div>}
-      <table className="table"><thead><tr><th>Name</th><th>Slug</th><th /></tr></thead><tbody>
+      <table className="table"><thead><tr><th>Name</th><th>Slug</th><th>Approvals<span className="hint" style={{ fontWeight: 400 }}> · non-admin changes need a second person</span></th><th /></tr></thead><tbody>
         {project.environments.map((e: Row) => (
           <tr key={e.id}><td style={{ fontWeight: 500 }}>{e.name}</td><td className="mono muted" style={{ fontSize: 13 }}>{e.slug}</td>
+            <td><span className="sw-row"><label className="switch"><input type="checkbox" aria-label={`Require approval for ${e.name}`} checked={!!e.protected} onChange={async (ev) => { try { await api(`/projects/${project.id}/environments/${e.id}`, { method: 'PATCH', body: { protected: ev.target.checked } }); reload() } catch (x) { setErr(x.message) } }} /><i /></label>{e.protected ? 'Required' : 'Off'}</span></td>
             <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={async () => { if (await ask(`Delete ${e.name} and all its secrets?`, { confirm: 'Delete', danger: true })) { try { await api(`/projects/${project.id}/environments/${e.id}`, { method: 'DELETE' }); reload() } catch (x) { setErr(x.message) } } }}>Delete</button></td></tr>))}
       </tbody></table>
       <form className="bar" style={{ paddingTop: 16 }} onSubmit={async (e) => { e.preventDefault(); try { await api(`/projects/${project.id}/environments`, { method: 'POST', body: { name } }); setName(''); setErr(''); reload() } catch (x) { setErr(x.message) } }}>

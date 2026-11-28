@@ -48,3 +48,7 @@ type ExportQuery struct {
 	Recursive bool
 	Resolve   bool
 }
+
+type DecideRequest struct {
+	Note string `json:"note" binding:"max=500"`
+}
