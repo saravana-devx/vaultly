@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { Avatar, Modal, Icon, copy } from '../components/ui'
+import { Avatar, Expiry, Modal, Icon, copy } from '../components/ui'
 import { ask, toast } from '../components/feedback'
 import { EmptyRow, EnvTag, Rel, RowMenu, TableFoot, cap, plural } from '../components/table'
 
@@ -19,12 +19,6 @@ function EnvAccess({ slugs, value, onChange }: { slugs: string[]; value: any; on
       ))}
     </div>
   )
-}
-
-// "in 7 days" reads faster than a locale date that could be day-first or month-first.
-function expiresIn(iso: string) {
-  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000)
-  return days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`
 }
 
 export default function Members() {
@@ -92,7 +86,7 @@ export default function Members() {
                 <td className="c-main">{i.email}</td>
                 <td className="role">{i.role}</td>
                 <td className="dim">{i.invited_by}</td>
-                <td>{i.expired ? <span className="state bad"><i />Expired</span> : <span className="dim" title={new Date(i.expires_at).toLocaleString()}>{expiresIn(i.expires_at)}</span>}</td>
+                <td>{i.expired ? <span className="state bad"><i />Expired</span> : <Expiry iso={i.expires_at} />}</td>
                 <td><RowMenu items={[{ label: 'Revoke invitation', icon: 'trash', danger: true, run: () => act(() => api(`/orgs/${orgId}/invites/${i.id}`, { method: 'DELETE' })) }]} /></td>
               </tr>))}
           </tbody></table><TableFoot>{plural(invites.length, 'pending invitation')}</TableFoot></div>

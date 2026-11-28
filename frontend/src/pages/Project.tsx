@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { Link } from 'react-router-dom'
-import { Avatar, Menu, Modal, Icon, copy, shortName } from '../components/ui'
+import { Avatar, Expiry, Menu, Modal, Icon, copy, shortName } from '../components/ui'
 import { ask, toast } from '../components/feedback'
 import { EnvTag, StateDot, Rel, RowMenu, TableFoot, EmptyRow, plural } from '../components/table'
 import Integrations from './project/Integrations'
@@ -289,7 +289,7 @@ function Tokens({ project }: { project: Row }) {
             <td><div className="state-line"><EnvTag slug={t.env} /><span className="mono dim" style={{ fontSize: 12.5 }}>{t.path}</span></div></td>
             <td><StateDot tone={t.can_write ? 'warn' : 'ok'}>{t.can_write ? 'Read & write' : 'Read only'}</StateDot></td>
             <td className="dim" title={(t.allowed_cidrs || []).join(', ')}>{(t.allowed_cidrs || []).length ? plural(t.allowed_cidrs.length, 'range') : 'Any IP'}</td>
-            <td className="dim">{t.expires_at ? new Date(t.expires_at).toLocaleDateString() : 'Never'}</td>
+            <td><Expiry iso={t.expires_at} /></td>
             <td className="dim"><Rel iso={t.last_used_at} /></td>
             <td><RowMenu items={[{ label: 'Revoke token', icon: 'trash', danger: true, run: async () => { if (await ask(`Revoke ${t.name}?`, { confirm: 'Revoke', danger: true })) { await api(`/projects/${pid}/tokens/${t.id}`, { method: 'DELETE' }); load() } } }]} /></td>
           </tr>))}

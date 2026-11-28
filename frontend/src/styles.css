@@ -987,3 +987,64 @@ html:has(.docs) { scroll-behavior: smooth; }
 [data-theme='light'] .docs .docs-nav a:not(.btn):not(.logo), [data-theme='light'] .docs .docs-toc a:not(.btn):not(.logo), [data-theme='light'] .docs .lp-links a:not(.btn):not(.logo) { color: var(--ink2); }
 [data-theme='light'] .docs .docs-nav a.on:not(.btn):not(.logo), [data-theme='light'] .docs .docs-toc a.on:not(.btn):not(.logo) { color: var(--ink); }
 [data-theme='light'] .docs .docs-pager a:not(.btn):not(.logo) { color: var(--ink); }
+
+/* ================= layout pass: mobile drawer, small fixes ================= */
+/* top bar: menu button and logo only on small screens */
+.menu-btn, .topbar-logo { display: none; }
+.side-scrim { display: none; }
+
+@media (max-width: 960px) {
+  .menu-btn { display: inline-grid; margin-left: -6px; }
+  .topbar-logo { display: inline-flex; align-items: center; }
+  .topbar-logo .logo-t { display: none; }
+  .searchbtn { flex: 1; min-width: 0; }
+  /* the sidebar becomes a drawer instead of a tall block above every page */
+  .shell .side {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 60; width: min(284px, 86vw); height: 100dvh;
+    flex-direction: column; flex-wrap: nowrap; align-items: stretch; overflow-y: auto;
+    border-right: 1px solid var(--line); border-bottom: 0; transform: translateX(-104%);
+    transition: transform .22s ease; box-shadow: 0 0 0 transparent;
+  }
+  .shell .side.open { transform: none; box-shadow: 24px 0 60px rgba(0, 0, 0, .35); }
+  .side-scrim { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(4, 6, 10, .55); backdrop-filter: blur(2px); }
+  .shell .side .nav-h { display: flex; }
+  .shell .side .side-projects { display: grid; max-height: none; }
+  .shell .side .side-bottom { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .shell .side .side-bottom .nav-h { display: flex; }
+  .shell .side .ws-card { min-width: 0; }
+  /* projects table: name and secret count only */
+  .ptable .hd, .ptable a { grid-template-columns: minmax(0, 1fr) 56px 16px; }
+  .ptable .hd > :nth-child(2), .ptable .hd > :nth-child(4), .ptable a > :nth-child(2), .ptable a > :nth-child(4) { display: none; }
+  .ptable .nm span { min-width: 0; white-space: nowrap; }
+}
+
+/* sign-in side panel: keep the headline and the example together instead of pinned to opposite edges */
+.auth-r { justify-content: center; gap: 56px; }
+
+/* expiry text: amber when close, red when passed */
+.expiry { color: var(--muted); white-space: nowrap; }
+.expiry.warn { color: #fbbf24; } .expiry.bad { color: #fb7185; }
+[data-theme='light'] .expiry.warn { color: #a16207; } [data-theme='light'] .expiry.bad { color: #be123c; }
+
+/* file picker that matches the other inputs */
+.filepick { position: relative; display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 5px 6px; border: 1px dashed var(--line2); border-radius: 9px; cursor: pointer; transition: border-color .12s; }
+.filepick:hover, .filepick:focus-within { border-color: var(--accent); }
+.filepick input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.filepick .btn { pointer-events: none; }
+.filepick .fname { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+@media (max-width: 960px) {
+  .shell .side .side-foot { margin: 10px 0 0; padding: 9px 10px; border: 1px solid var(--line); }
+  .shell .side .side-foot .menu-wrap, .shell .side .side-foot .trigger { width: 100%; }
+  /* search becomes an icon button; the full palette still opens on tap */
+  .searchbtn { flex: none; width: 36px; padding: 0; justify-content: center; }
+  .searchbtn span, .searchbtn kbd { display: none; }
+}
+.field .filepick { justify-content: flex-start; }
+
+/* ---- sidebar pass ---- */
+.side-projects .navlink { min-width: 0; }
+.side-projects .navlink span.t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-more { color: var(--muted); font-size: 12.5px; gap: 6px; padding-left: 26px; }
+.side-more:hover { color: var(--ink); }
+.side-bottom a[target='_blank'] > svg:last-child { margin-left: auto; color: var(--muted); opacity: .7; }
+.shell.collapsed .side-bottom a[target='_blank'] > svg:last-child { display: none; }

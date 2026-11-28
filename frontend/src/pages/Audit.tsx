@@ -1,5 +1,5 @@
 import type { Row } from '../types'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import { Avatar, Icon, shortName } from '../components/ui'
@@ -22,20 +22,25 @@ export default function Audit() {
   const [loading, setLoading] = useState(true)
   // The type filter runs on the server so it covers the whole log. Actor, resource and IP are
   // stored encrypted, so the search box can only look through the events loaded so far.
+  // Only the newest request may write state: switching the type (or workspace) while a page is
+  // still loading must not let the older response overwrite the newer list.
+  const seq = useRef(0)
   const load = async (before = '', type = kind) => {
+    const mine = ++seq.current
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (before) params.set('before', before)
       if (type) params.set('kind', type)
       const d = await api(`/orgs/${orgId}/audit${params.size ? `?${params}` : ''}`)
+      if (mine !== seq.current) return
       setEvents((cur) => {
         if (!before) return d.events
         const seen = new Set(cur.map((e) => e.id))
         return [...cur, ...d.events.filter((e: Row) => !seen.has(e.id))]
       })
       setNext(d.next || ''); setErr('')
-    } catch (x) { setErr(x.message) } finally { setLoading(false) }
+    } catch (x: any) { if (mine === seq.current) setErr(x.message) } finally { if (mine === seq.current) setLoading(false) }
   }
   useEffect(() => { load('', kind) }, [orgId, kind])
   const needle = q.trim().toLowerCase()

@@ -47,6 +47,7 @@ const PATHS: Record<string, ReactNode> = {
   pulse: <path d="M3 12h4l2.5-7 4 14 2.5-7H21" />,
   shield: <><path d="M12 3l8 3v6c0 4.5-3.3 8-8 9-4.7-1-8-4.5-8-9V6z" /><path d="M9 12l2 2 4-4" /></>,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+  external: <><path d="M14 5h5v5M19 5l-8 8" /><path d="M18 14v4a1 1 0 01-1 1H6a1 1 0 01-1-1V7a1 1 0 011-1h4" /></>,
   moon: <path d="M20.5 13.2A8.5 8.5 0 1110.8 3.5a6.8 6.8 0 009.7 9.7z" />,
 }
 
@@ -105,6 +106,23 @@ export const ago = (iso?: string | null) => {
   if (s < 86400) return `${Math.floor(s / 3600)} hr ago`
   if (s < 86400 * 30) return `${Math.floor(s / 86400)} d ago`
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// "in 5 days" for a future date (expiry), read faster than a locale date that may be day- or month-first.
+export const until = (iso?: string | null) => {
+  if (!iso) return 'Never'
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000)
+  if (days < 0) return 'Expired'
+  return days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${days} days`
+}
+const fullDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+
+// Expiry cell: relative text, the exact date on hover, amber when it is close and red once passed.
+export function Expiry({ iso }: { iso?: string | null }) {
+  if (!iso) return <span className="dim">Never</span>
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000)
+  const tone = days < 0 ? 'bad' : days <= 7 ? 'warn' : ''
+  return <span className={`expiry ${tone}`} title={fullDate(iso)}>{until(iso)}</span>
 }
 
 const HUES = [152, 200, 262, 24, 330, 48, 180, 12]

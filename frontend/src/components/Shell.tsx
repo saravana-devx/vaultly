@@ -6,6 +6,7 @@ import { Avatar, Icon, Logo, Menu, ThemeToggle, currentTheme, flipTheme, hue } f
 import CommandPalette from './CommandPalette'
 import type { Row } from '../types'
 
+const SIDE_LIMIT = 8
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 
 export default function Shell() {
@@ -17,6 +18,15 @@ export default function Shell() {
   useEffect(() => { scroller.current?.scrollTo(0, 0) }, [pathname])
   const [projects, setProjects] = useState<Row[]>([])
   const [palette, setPalette] = useState(false)
+  // Phones and small tablets: the sidebar becomes a drawer that slides in from the left.
+  const [navOpen, setNavOpen] = useState(false)
+  useEffect(() => { setNavOpen(false) }, [pathname])
+  useEffect(() => {
+    if (!navOpen) return undefined
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navOpen])
   const [theme, setTheme] = useState(currentTheme)
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('vaultly-sidebar') === 'collapsed' } catch { return false } })
   const toggleSidebar = () => setCollapsed((c) => {
@@ -38,10 +48,16 @@ export default function Shell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // The sidebar lists a few projects; the one you are in is always among them.
+  const currentPid = pathname.match(/^\/dashboard\/projects\/([^/?]+)/)?.[1]
+  const top = projects.slice(0, SIDE_LIMIT)
+  const current = projects.find((p) => p.id === currentPid)
+  const sideProjects = !current || top.includes(current) ? top : [...top.slice(0, SIDE_LIMIT - 1), current]
   const link = ({ isActive }: { isActive: boolean }) => `navlink${isActive ? ' active' : ''}`
   return (
     <div className={`shell${collapsed ? ' collapsed' : ''}`}>
-      <aside className="side">
+      {navOpen && <div className="side-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <aside className={`side${navOpen ? ' open' : ''}`} aria-label="Navigation">
         <div className="side-top">
           <Link to="/dashboard" className="side-brand" aria-label="Vaultly overview"><Logo size={26} /></Link>
           <button className="iconbtn side-collapse" onClick={toggleSidebar} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}><Icon name="panel" size={16} /></button>
@@ -65,17 +81,20 @@ export default function Shell() {
           <div className="nav-h"><span>Projects</span>{admin && <Link to="/dashboard/projects?new=1" className="nav-plus" title="New project" aria-label="New project"><Icon name="plus" size={14} /></Link>}</div>
         )}
         <div className="side-projects">
-          {projects.map((p) => (
-            <NavLink key={p.id} to={`/dashboard/projects/${p.id}`} className={link}>
+          {sideProjects.map((p) => (
+            <NavLink key={p.id} to={`/dashboard/projects/${p.id}`} className={link} title={p.name}>
               <i style={{ width: 8, height: 8, borderRadius: 3, background: `hsl(${hue(p.name)} 60% 58%)`, flex: 'none', margin: '0 5px 0 4px' }} />
               <span className="t">{p.name}</span>
             </NavLink>
           ))}
+          {projects.length > SIDE_LIMIT && (
+            <Link to="/dashboard/projects" className="navlink side-more">View all {projects.length} projects<Icon name="right" size={13} /></Link>
+          )}
         </div>
 
         <div className="side-bottom">
           <div className="nav-h"><span>Support</span></div>
-          <a className="navlink" href="/docs" target="_blank" rel="noreferrer" title="Documentation"><Icon name="book" /><span className="nl">Documentation</span></a>
+          <a className="navlink" href="/docs" target="_blank" rel="noreferrer" title="Documentation"><Icon name="book" /><span className="nl">Documentation</span><Icon name="external" size={13} /></a>
           <NavLink to="/dashboard/settings" className={link} title="Settings"><Icon name="cog" /><span className="nl">Settings</span></NavLink>
 
           <div className="side-foot">
@@ -96,6 +115,8 @@ export default function Shell() {
 
       <div className="colmain" ref={scroller}>
         <header className="topbar">
+          <button className="iconbtn menu-btn" onClick={() => setNavOpen(true)} aria-label="Open menu" aria-expanded={navOpen}><Icon name="panel" size={18} /></button>
+          <Link to="/dashboard" className="topbar-logo" aria-label="Vaultly overview"><Logo size={24} /></Link>
           <button className="searchbtn" onClick={() => setPalette(true)}><Icon name="search" size={15} /><span>Search projects, pages, actions…</span><kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd></button>
           <div style={{ flex: 1 }} />
           <ThemeToggle />

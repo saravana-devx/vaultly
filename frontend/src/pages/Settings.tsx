@@ -3,7 +3,7 @@ import type { Row } from '../types'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiBlob, apiForm } from '../api'
 import { useAuth } from '../auth'
-import { Modal, Icon, copy } from '../components/ui'
+import { Expiry, Modal, Icon, copy } from '../components/ui'
 import { ask, toast } from '../components/feedback'
 import { EmptyRow, Rel, RowMenu, TableFoot, plural } from '../components/table'
 
@@ -35,7 +35,7 @@ function PersonalTokens() {
           <tr key={t.id}>
             <td className="c-main">{t.name}</td>
             <td className="mono dim" style={{ fontSize: 12.5 }}>{t.prefix}…</td>
-            <td className="dim">{t.expires_at ? new Date(t.expires_at).toLocaleDateString() : 'Never'}</td>
+            <td><Expiry iso={t.expires_at} /></td>
             <td className="dim"><Rel iso={t.last_used_at} /></td>
             <td><RowMenu items={[{ label: 'Revoke token', icon: 'trash', danger: true, run: async () => { if (await ask(`Revoke ${t.name}?`, { confirm: 'Revoke', danger: true })) { await api(`/me/tokens/${t.id}`, { method: 'DELETE' }); load() } } }]} /></td>
           </tr>))}
@@ -70,6 +70,7 @@ function Backup({ orgId, orgName }: { orgId: string; orgName: string }) {
   const [rpass, setRpass] = useState('')
   const [result, setResult] = useState<Row | null>(null)
   const file = useRef<HTMLInputElement>(null)
+  const [fileName, setFileName] = useState('')
 
   const download = async (e: FormEvent) => {
     e.preventDefault(); setErr(''); setBusy(true)
@@ -84,7 +85,7 @@ function Backup({ orgId, orgName }: { orgId: string; orgName: string }) {
     e.preventDefault(); setErr(''); setResult(null)
     const fd = new FormData(); fd.append('file', file.current!.files![0]); fd.append('passphrase', rpass)
     setBusy(true)
-    try { setResult(await apiForm(`/orgs/${orgId}/restore`, fd)); setRpass(''); file.current!.value = ''; window.dispatchEvent(new Event('vaultly:projects')) } catch (x) { setErr(x.message) }
+    try { setResult(await apiForm(`/orgs/${orgId}/restore`, fd)); setRpass(''); file.current!.value = ''; setFileName(''); window.dispatchEvent(new Event('vaultly:projects')) } catch (x) { setErr(x.message) }
     setBusy(false)
   }
   return (
@@ -100,8 +101,13 @@ function Backup({ orgId, orgName }: { orgId: string; orgName: string }) {
         </form>
         <form onSubmit={restore}>
           <h3 className="h3">Restore from a backup</h3>
-          <p className="muted" style={{ fontSize: 13.5, margin: '4px 0 14px' }}>Projects keep their original IDs and are never overwritten. The server must use the same MASTER_KEY the backup was made with.</p>
-          <div className="field"><label>Backup file</label><input className="input" type="file" accept=".vbk" required ref={file} style={{ paddingTop: 8 }} /></div>
+          <p className="muted" style={{ fontSize: 13.5, margin: '4px 0 14px' }}>Projects keep their original IDs and are never overwritten. Restoring needs the same root key the backup was made with: the OpenBao data, or MASTER_KEY in local mode.</p>
+          <div className="field"><label>Backup file</label>
+            <label className="filepick">
+              <input type="file" accept=".vbk" required ref={file} onChange={(e) => setFileName(e.target.files?.[0]?.name || '')} />
+              <span className="btn sm"><Icon name="upload" size={14} /> Choose file</span>
+              <span className={`fname${fileName ? '' : ' dim'}`}>{fileName || 'No file chosen (.vbk)'}</span>
+            </label></div>
           <div className="field"><label>Passphrase</label><input className="input" type="password" required autoComplete="off" value={rpass} onChange={(e) => setRpass(e.target.value)} /></div>
           <button className="btn" disabled={busy}><Icon name="upload" size={15} /> Restore</button>
         </form>
