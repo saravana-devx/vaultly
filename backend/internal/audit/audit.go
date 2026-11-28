@@ -218,6 +218,9 @@ func (s *Service) Close() {
 }
 
 func (s *Service) insert(ctx context.Context, e Event) error {
+	if s.pool == nil { // in-memory only (tests): subscribers still see the event
+		return nil
+	}
 	e = s.seal(e)
 	md := e.Sealed
 	if md == "" {

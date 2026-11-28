@@ -122,7 +122,7 @@ func TestResolveCycleTerminates(t *testing.T) {
 func TestResolveDepthLimit(t *testing.T) {
 	s := newStore(t)
 	// K0 -> K1 -> ... -> K20: a long but acyclic chain must stop at the depth limit, not recurse forever.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		s.put("dev", "/", key(i), "${"+key(i+1)+"}")
 	}
 	s.put("dev", "/", key(20), "end")
@@ -180,6 +180,23 @@ func TestResolveProjectBoundAAD(t *testing.T) {
 	r := newResolver(context.Background(), uuid.New(), s.dek, nil, s, s)
 	if got := r.expand("${HOST}", "dev", "/", map[string]bool{}, 0); got != "${HOST}" {
 		t.Fatalf("ciphertext opened under a different project: %q", got)
+	}
+}
+
+func TestMachinePutRejectsReadOnlyToken(t *testing.T) {
+	// Checked before any storage is touched, so a zero Service is enough.
+	a := principal.Actor{Token: &principal.ServiceToken{PathPrefix: "/", CanWrite: false}}
+	_, err := (&Service{}).MachinePut(context.Background(), a, &MachinePutRequest{Key: "KEY", Value: "v"})
+	if !errors.Is(err, ErrReadOnlyToken) {
+		t.Fatalf("got %v, want ErrReadOnlyToken", err)
+	}
+}
+
+func TestMachinePutRejectsOutOfScopePath(t *testing.T) {
+	a := principal.Actor{Token: &principal.ServiceToken{PathPrefix: "/app", CanWrite: true}}
+	_, err := (&Service{}).MachinePut(context.Background(), a, &MachinePutRequest{Path: "/stripe", Key: "KEY", Value: "v"})
+	if ae, ok := apperr.As(err); !ok || ae.Kind != apperr.KindForbidden {
+		t.Fatalf("got %v, want forbidden", err)
 	}
 }
 
