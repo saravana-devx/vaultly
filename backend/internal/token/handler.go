@@ -103,3 +103,11 @@ func (h *Handler) RevokePersonal(c *gin.Context) {
 	}
 	httpx.Success(c, http.StatusOK, MsgPersonalRevoked, nil)
 }
+
+// WhoAmI describes the calling service token, so the CLI can confirm a login and show its scope.
+func (h *Handler) WhoAmI(c *gin.Context) {
+	t := principal.From(c).Token
+	httpx.Success(c, http.StatusOK, MsgWhoAmI, gin.H{
+		"name": t.Name, "project_id": t.ProjectID, "env": t.EnvSlug, "path": t.PathPrefix, "can_write": t.CanWrite,
+	})
+}

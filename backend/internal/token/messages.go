@@ -14,6 +14,7 @@ const (
 	MsgTokenNotFound  = "Token not found"
 	MsgNeedPassword   = "Sign in with your password to manage personal tokens"
 	MsgInvalidToken   = "Invalid or expired token"
+	MsgWhoAmI         = "Token details"
 	MsgNeedService    = "A service token is required"
 	MsgIPNotAllowed   = "This token cannot be used from your IP address"
 )
