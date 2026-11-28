@@ -127,6 +127,7 @@ func (b *Box) convertColumns(ctx context.Context, pool *pgxpool.Pool, counts map
 		{"dynamic_configs", "name", "dynamic_configs.name"},
 		{"dynamic_leases", "username", "dynamic_leases.username"}, {"dynamic_leases", "revoke_error", "dynamic_leases.revoke_error"},
 		{"invites", "env_roles", "invites.env_roles"}, {"audit_logs", "metadata", "audit.metadata"},
+		{"change_requests", "comment", "change_requests.comment"}, {"change_requests", "note", "change_requests.note"},
 	} {
 		var n int
 		var err error

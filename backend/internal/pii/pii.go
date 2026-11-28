@@ -94,6 +94,8 @@ var sealedFields = map[string]bool{
 	"orgs.name":                   true,
 	"secrets.key":                 true,
 	"secrets.comment":             true,
+	"change_requests.comment":     true, // same text as secrets.comment, proposed for review
+	"change_requests.note":        true, // a reviewer's note can quote the value or the reason
 	"service_tokens.prefix":       true,
 	"service_tokens.cidrs":        true,
 	"personal_tokens.prefix":      true,

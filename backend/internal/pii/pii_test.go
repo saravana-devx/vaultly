@@ -97,7 +97,7 @@ func TestNamesAreSealedIdempotentAndLegacyPlaintextPasses(t *testing.T) {
 
 func TestPolicyDecidesWhatIsSealed(t *testing.T) {
 	b := box()
-	for _, f := range []string{"orgs.name", "secrets.key", "secrets.comment", "webhooks.url", "service_tokens.cidrs"} {
+	for _, f := range []string{"orgs.name", "secrets.key", "secrets.comment", "change_requests.comment", "change_requests.note", "webhooks.url", "service_tokens.cidrs"} {
 		if !Encrypted(f) || !Sealed(b.SealName(f, "x")) {
 			t.Errorf("%s must be sealed", f)
 		}
