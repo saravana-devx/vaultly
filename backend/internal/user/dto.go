@@ -17,3 +17,27 @@ type AuthResponse struct {
 	ExpiresIn   int     `json:"expires_in"`
 	User        Profile `json:"user"`
 }
+
+type LoginMFARequest struct {
+	Challenge string `json:"challenge" binding:"required"`
+	Code      string `json:"code" binding:"required,max=32"`
+}
+
+type MFACodeRequest struct {
+	Code string `json:"code" binding:"required,max=32"`
+}
+
+type MFADisableRequest struct {
+	Password string `json:"password" binding:"required"`
+	Code     string `json:"code" binding:"required,max=32"`
+}
+
+// MFAChallengeResponse is what login returns when a second factor is needed.
+type MFAChallengeResponse struct {
+	MFARequired bool   `json:"mfa_required"`
+	Challenge   string `json:"challenge"`
+}
+
+type RecoveryCodesResponse struct {
+	RecoveryCodes []string `json:"recovery_codes"`
+}

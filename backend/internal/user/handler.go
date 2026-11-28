@@ -45,6 +45,10 @@ func (h *Handler) Login(c *gin.Context) {
 		httpx.Fail(c, err)
 		return
 	}
+	if session.MFAChallenge != "" { // no cookie yet: the second factor is still owed
+		httpx.Success(c, http.StatusOK, MsgMFARequired, MFAChallengeResponse{MFARequired: true, Challenge: session.MFAChallenge})
+		return
+	}
 	h.respond(c, http.StatusOK, MsgLoggedIn, session)
 }
 
@@ -94,4 +98,89 @@ func setRefreshCookie(c *gin.Context, token string, maxAge int) {
 		Name: refreshCookie, Value: token, Path: "/api/auth", MaxAge: maxAge,
 		HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode,
 	})
+}
+
+func (h *Handler) LoginMFA(c *gin.Context) {
+	var body LoginMFARequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.BindError(c, err)
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	session, err := h.svc.LoginMFA(ctx, &body, c.ClientIP())
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	h.respond(c, http.StatusOK, MsgLoggedIn, session)
+}
+
+func (h *Handler) MFAStatus(c *gin.Context) {
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	st, err := h.svc.MFAStatus(ctx, principal.From(c))
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgMFAStatus, st)
+}
+
+func (h *Handler) MFASetup(c *gin.Context) {
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	out, err := h.svc.MFASetup(ctx, principal.From(c))
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgMFASetup, out)
+}
+
+func (h *Handler) MFAEnable(c *gin.Context) {
+	var body MFACodeRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.BindError(c, err)
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	codes, err := h.svc.MFAEnable(ctx, principal.From(c), body.Code)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgMFAEnabled, RecoveryCodesResponse{RecoveryCodes: codes})
+}
+
+func (h *Handler) MFADisable(c *gin.Context) {
+	var body MFADisableRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.BindError(c, err)
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	if err := h.svc.MFADisable(ctx, principal.From(c), &body); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgMFADisabled, nil)
+}
+
+func (h *Handler) MFARegenerate(c *gin.Context) {
+	var body MFACodeRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.BindError(c, err)
+		return
+	}
+	ctx, cancel := httpx.Timeout(c, httpx.DefaultTimeout)
+	defer cancel()
+	codes, err := h.svc.MFARegenerate(ctx, principal.From(c), body.Code)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.Success(c, http.StatusOK, MsgMFARegenerated, RecoveryCodesResponse{RecoveryCodes: codes})
 }

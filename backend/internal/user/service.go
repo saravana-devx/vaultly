@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -18,6 +19,7 @@ type UserRepository interface {
 	ByEmailHash(ctx context.Context, hash []byte) (*Record, error)
 	ByID(ctx context.Context, id uuid.UUID) (*Record, error)
 	FirstOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, bool, error)
+	MFARepository
 }
 
 type Service struct {
@@ -25,12 +27,14 @@ type Service struct {
 	pii       *pii.Box
 	sessions  *auth.Manager
 	audit     *audit.Service
+	mfa       *mfaService
 	dummyHash string
 }
 
 func NewService(repo UserRepository, box *pii.Box, sessions *auth.Manager, audit *audit.Service) *Service {
 	dummy, _ := auth.HashPassword("dummy-password-for-timing")
-	return &Service{repo: repo, pii: box, sessions: sessions, audit: audit, dummyHash: dummy}
+	return &Service{repo: repo, pii: box, sessions: sessions, audit: audit, dummyHash: dummy,
+		mfa: &mfaService{repo: repo, seal: box.Seal, open: box.Open, now: time.Now}}
 }
 
 func NormEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
@@ -76,9 +80,17 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest, ip string) (*Ses
 	if err != nil {
 		return nil, err
 	}
-	if orgID, ok, _ := s.repo.FirstOrg(ctx, profile.ID); ok {
-		s.audit.Record(ctx, principal.Actor{UserID: profile.ID, Email: profile.Email, IP: ip}, orgID, nil, "auth.login", "", nil)
+	// With 2FA on, the password alone earns a short-lived challenge, not a session.
+	if m, err := s.repo.MFA(ctx, profile.ID); err != nil {
+		return nil, err
+	} else if m.Enabled() {
+		ch, err := s.sessions.NewMFAChallenge(ctx, profile.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &Session{MFAChallenge: ch}, nil
 	}
+	s.recordUser(ctx, principal.Actor{UserID: profile.ID, Email: profile.Email, IP: ip}, "auth.login", nil)
 	return s.issue(ctx, profile)
 }
 

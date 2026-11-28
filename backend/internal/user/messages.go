@@ -13,4 +13,18 @@ const (
 	MsgNoSession          = "No session"
 	MsgSessionExpired     = "Session expired"
 	MsgUserNotFound       = "No user with that email. Ask them to sign up first"
+
+	MsgMFARequired         = "Enter the code from your authenticator app"
+	MsgMFAStatus           = "Two-factor status fetched"
+	MsgMFASetup            = "Scan the QR code, then confirm with a code"
+	MsgMFAEnabled          = "Two-factor sign-in is on. Save your recovery codes now"
+	MsgMFADisabled         = "Two-factor sign-in is off"
+	MsgMFARegenerated      = "New recovery codes created. The old ones no longer work"
+	MsgInvalidMFACode      = "That code is not valid"
+	MsgMFAChallengeExpired = "Sign-in timed out. Enter your password again"
+	MsgMFANotEnabled       = "Two-factor sign-in is not on"
+	MsgMFAAlreadyOn        = "Two-factor sign-in is already on"
+	MsgMFANoSetup          = "Start setup first"
+	MsgMFANeedSession      = "Sign in with your password to change two-factor settings"
+	MsgWrongPassword       = "Wrong password"
 )

@@ -10,7 +10,9 @@ export interface AuthValue {
   org: Org | undefined
   switchOrg: (id: string) => void
   reloadOrgs: () => Promise<Org[]>
-  login: (email: string, password: string) => Promise<void>
+  /** Resolves to a challenge string when a second factor is still needed. */
+  login: (email: string, password: string) => Promise<string | null>
+  loginMFA: (challenge: string, code: string) => Promise<void>
   register: (body: unknown) => Promise<void>
   logout: () => Promise<void>
 }
@@ -49,7 +51,13 @@ export function AuthProvider({ children }: { children?: ReactNode }) {
     org: orgs.find((o) => o.id === orgId),
     switchOrg: (id: string) => { localStorage.setItem('vaultly_org', id); setOrgId(id) },
     reloadOrgs: loadOrgs,
-    login: async (e: string, p: string) => start(await authApi.login(e, p)),
+    login: async (e: string, p: string) => {
+      const r = await authApi.login(e, p)
+      if (r.challenge) return r.challenge
+      await start(r.user)
+      return null
+    },
+    loginMFA: async (ch: string, code: string) => start(await authApi.loginMFA(ch, code)),
     register: async (b: unknown) => start(await authApi.register(b)),
     logout: async () => { await authApi.logout(); setUser(null); setOrgs([]) },
   }

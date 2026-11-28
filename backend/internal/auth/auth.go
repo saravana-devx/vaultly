@@ -62,6 +62,55 @@ func (m *Manager) ParseAccessToken(s string) (*Claims, error) {
 	return c, nil
 }
 
+// MFA challenges bridge the two login steps: the password step returns one instead of a session,
+// and the code step redeems it. Stored hashed, 5-minute TTL, dead after MaxMFAAttempts wrong codes.
+const (
+	MFAChallengeTTL = 5 * time.Minute
+	MaxMFAAttempts  = 5
+)
+
+func (m *Manager) NewMFAChallenge(ctx context.Context, userID uuid.UUID) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	tok := base64.RawURLEncoding.EncodeToString(b)
+	k := mfaKey(tok)
+	pipe := m.rdb.TxPipeline()
+	pipe.HSet(ctx, k, "uid", userID.String(), "fails", 0)
+	pipe.Expire(ctx, k, MFAChallengeTTL)
+	_, err := pipe.Exec(ctx)
+	return tok, err
+}
+
+// PeekMFAChallenge returns the user a live challenge belongs to without consuming it.
+func (m *Manager) PeekMFAChallenge(ctx context.Context, tok string) (uuid.UUID, error) {
+	v, err := m.rdb.HGet(ctx, mfaKey(tok), "uid").Result()
+	if err != nil {
+		return uuid.Nil, errors.New("invalid challenge")
+	}
+	return uuid.Parse(v)
+}
+
+// FailMFAChallenge counts a wrong code and deletes the challenge once the limit is reached.
+func (m *Manager) FailMFAChallenge(ctx context.Context, tok string) {
+	k := mfaKey(tok)
+	if n, err := m.rdb.HIncrBy(ctx, k, "fails", 1).Result(); err == nil && n >= MaxMFAAttempts {
+		m.rdb.Del(ctx, k)
+	}
+}
+
+// ConsumeMFAChallenge deletes the challenge; it reports false if it was already gone (single use).
+func (m *Manager) ConsumeMFAChallenge(ctx context.Context, tok string) bool {
+	n, err := m.rdb.Del(ctx, mfaKey(tok)).Result()
+	return err == nil && n == 1
+}
+
+func mfaKey(tok string) string {
+	h := sha256.Sum256([]byte(tok))
+	return "mfa:" + hex.EncodeToString(h[:])
+}
+
 // Refresh tokens are opaque, stored hashed in Redis, and rotated on every use.
 func (m *Manager) NewRefreshToken(ctx context.Context, userID uuid.UUID) (string, error) {
 	b := make([]byte, 32)

@@ -30,7 +30,7 @@ function Layout({ title, sub, onSubmit, cta, alt, aside, children }: { title: st
         <header><Link to="/"><Logo /></Link><Link to="/" className="back">← Back to home</Link></header>
         <form className="auth-form" noValidate={false} onSubmit={async (e) => {
           e.preventDefault(); setErr(''); setBusy(true)
-          try { await onSubmit(new FormData(e.target)) } catch (x) { setErr(x.message); setBusy(false) }
+          try { await onSubmit(new FormData(e.target)); setBusy(false) } catch (x) { setErr(x.message); setBusy(false) }
         }}>
           <h1>{title}</h1>
           <p className="sub">{sub}</p>
@@ -63,12 +63,32 @@ function Password({ name, autoComplete, placeholder, onChange }: { name: string;
 const safeNext = (p: URLSearchParams) => { const n = p.get('next'); return n && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard' }
 
 export function Login() {
-  const { login } = useAuth(); const nav = useNavigate(); const [params] = useSearchParams()
+  const { login, loginMFA } = useAuth(); const nav = useNavigate(); const [params] = useSearchParams()
   const next = safeNext(params); const q = params.get('next') ? `?next=${encodeURIComponent(next)}` : ''
+  const [challenge, setChallenge] = useState<string | null>(null)
+  const [recovery, setRecovery] = useState(false)
+  const aside = <Aside heading={<>Everything your app needs to <em>know</em>, and nothing it doesn’t.</>} />
+  if (challenge) {
+    return (
+      <Layout key={recovery ? 'rc' : 'totp'} title="Two-factor sign-in" cta="Verify" aside={aside}
+        sub={recovery ? 'Enter one of the recovery codes you saved when you turned on two-factor sign-in. Each code works once.' : 'Enter the 6-digit code from your authenticator app.'}
+        alt={<><button type="button" className="linkbtn" onClick={() => setRecovery(!recovery)}>{recovery ? 'Use the authenticator app' : 'Use a recovery code'}</button> · <button type="button" className="linkbtn" onClick={() => { setChallenge(null); setRecovery(false) }}>Start over</button></>}
+        onSubmit={async (f) => {
+          try { await loginMFA(challenge, String(f.get('code'))); nav(next) } catch (x) {
+            if (x.status === 401 && /timed out/i.test(x.message)) setChallenge(null)
+            throw x
+          }
+        }}>
+        {recovery
+          ? <Field label="Recovery code"><input className="input mono" name="code" required autoFocus autoComplete="off" spellCheck={false} placeholder="k7m2q-x9p4t" /></Field>
+          : <Field label="Code"><input className="input mono otp" name="code" required autoFocus autoComplete="one-time-code" inputMode="numeric" pattern="[0-9 ]{6,7}" maxLength={7} placeholder="123 456" /></Field>}
+      </Layout>
+    )
+  }
   return (
-    <Layout title="Welcome back" sub="Sign in to your workspace." cta="Sign in" aside={<Aside heading={<>Everything your app needs to <em>know</em>, and nothing it doesn’t.</>} />}
+    <Layout title="Welcome back" sub="Sign in to your workspace." cta="Sign in" aside={aside}
       alt={<>Don’t have an account? <Link to={`/register${q}`}>Create one</Link></>}
-      onSubmit={async (f) => { await login(f.get('email'), f.get('password')); nav(next) }}>
+      onSubmit={async (f) => { const ch = await login(f.get('email'), f.get('password')); if (ch) setChallenge(ch); else nav(next) }}>
       <Field label="Email"><input className="input" name="email" type="email" required autoFocus autoComplete="email" placeholder="you@company.com" /></Field>
       <Field label="Password"><Password name="password" autoComplete="current-password" /></Field>
     </Layout>

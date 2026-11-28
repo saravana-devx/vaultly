@@ -1,6 +1,10 @@
 package user
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Profile is the decrypted, public view of an account.
 type Profile struct {
@@ -29,4 +33,16 @@ type Session struct {
 	AccessToken  string
 	RefreshToken string
 	User         Profile
+	MFAChallenge string // set instead of the tokens when a second factor is still needed
 }
+
+// MFARecord is a user's 2FA state as stored; SecretEnc and PendingEnc are sealed.
+type MFARecord struct {
+	SecretEnc    string
+	PendingEnc   string
+	LastStep     int64
+	EnabledAt    *time.Time
+	RecoveryLeft int
+}
+
+func (m *MFARecord) Enabled() bool { return m.SecretEnc != "" }

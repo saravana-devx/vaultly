@@ -59,8 +59,15 @@ export async function api(path: string, opts: ApiOptions = {}): Promise<any> {
 }
 
 export const authApi = {
+  // Returns the user, or { challenge } when the account has two-factor sign-in on.
   login: async (email: string, password: string) => {
     const d = await api('/auth/login', { method: 'POST', body: { email, password }, auth: false, quiet: true })
+    if (d.mfa_required) return { challenge: d.challenge as string }
+    accessToken = d.access_token
+    return { user: d.user }
+  },
+  loginMFA: async (challenge: string, code: string) => {
+    const d = await api('/auth/login/mfa', { method: 'POST', body: { challenge, code }, auth: false, quiet: true })
     accessToken = d.access_token
     return d.user
   },
