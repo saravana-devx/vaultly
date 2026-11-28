@@ -20,7 +20,7 @@ function Preview() {
     <div className="pv" aria-hidden="true">
       <div className="pv-side">
         <div className="ws">
-          <span className="sq">A</span>Acme
+          <span className="sq">V</span>Vaultly
         </div>
         <a>Overview</a>
         <a className="on">Projects</a>
@@ -267,28 +267,28 @@ JWT_SECRET=`}
               <div>
                 <b>v4</b>
                 <span>
-                  Rotated<small>maya@acme.io</small>
+                  Rotated<small>lily@vaultly.dev</small>
                 </span>
                 <small>2 hr ago</small>
               </div>
               <div>
                 <b>v3</b>
                 <span>
-                  Updated<small>dev@acme.io</small>
+                  Updated<small>rose@vaultly.dev</small>
                 </span>
                 <span className="lnk">Restore</span>
               </div>
               <div>
                 <b>v2</b>
                 <span>
-                  Updated<small>maya@acme.io</small>
+                  Updated<small>lily@vaultly.dev</small>
                 </span>
                 <span className="lnk">Restore</span>
               </div>
               <div>
                 <b>v1</b>
                 <span>
-                  Created<small>maya@acme.io</small>
+                  Created<small>lily@vaultly.dev</small>
                 </span>
                 <span className="lnk">Restore</span>
               </div>
@@ -323,7 +323,7 @@ JWT_SECRET=`}
             {"\n"}
             <span className="g">$</span> curl -H{" "}
             <span className="y">"Authorization: Bearer $VAULTLY_TOKEN"</span> \
-            {"\n"} https://vault.acme.io/api/v1/secrets
+            {"\n"} https://vaultly.dev/api/v1/secrets
           </div>
         </div>
 
@@ -352,7 +352,7 @@ JWT_SECRET=`}
             <div>
               <time>14:02:11</time>
               <span>
-                maya@acme.io <b>secret.update</b> /stripe/KEY
+                lily@vaultly.dev <b>secret.update</b> /stripe/KEY
               </span>
               <em>production</em>
             </div>
@@ -366,21 +366,21 @@ JWT_SECRET=`}
             <div>
               <time>13:58:20</time>
               <span>
-                dev@acme.io <b>secret.read</b> /database/URL
+                rose@vaultly.dev <b>secret.read</b> /database/URL
               </span>
               <em>development</em>
             </div>
             <div>
               <time>13:40:02</time>
               <span>
-                maya@acme.io <b>token.create</b> deploy-bot
+                lily@vaultly.dev <b>token.create</b> deploy-bot
               </span>
               <em>production</em>
             </div>
             <div>
               <time>13:12:37</time>
               <span>
-                dev@acme.io <b>auth.login</b>
+                rose@vaultly.dev <b>auth.login</b>
               </span>
               <em>—</em>
             </div>

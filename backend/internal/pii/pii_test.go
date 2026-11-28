@@ -16,19 +16,19 @@ func box() *Box {
 
 func TestSealOpenRoundTripAndRandomised(t *testing.T) {
 	b := box()
-	s1, s2 := b.Seal("users.email", "maya@acme.io"), b.Seal("users.email", "maya@acme.io")
-	if !Sealed(s1) || s1 == s2 || strings.Contains(s1, "maya") {
+	s1, s2 := b.Seal("users.email", "lily@vaultly.dev"), b.Seal("users.email", "lily@vaultly.dev")
+	if !Sealed(s1) || s1 == s2 || strings.Contains(s1, "lily") {
 		t.Fatalf("sealed values must be opaque and randomised: %q %q", s1, s2)
 	}
 	got, err := b.Open("users.email", s1)
-	if err != nil || got != "maya@acme.io" {
+	if err != nil || got != "lily@vaultly.dev" {
 		t.Fatalf("open: %q %v", got, err)
 	}
 }
 
 func TestFieldNameIsBoundToTheCiphertext(t *testing.T) {
 	b := box()
-	s := b.Seal("users.email", "maya@acme.io")
+	s := b.Seal("users.email", "lily@vaultly.dev")
 	if _, err := b.Open("users.name", s); err == nil {
 		t.Fatal("a value sealed for one column must not open as another column")
 	}
@@ -39,13 +39,13 @@ func TestFieldNameIsBoundToTheCiphertext(t *testing.T) {
 
 func TestBlindIndexIsStableCaseInsensitiveAndKeyed(t *testing.T) {
 	b := box()
-	if !bytes.Equal(b.Index("Maya@Acme.io "), b.Index("maya@acme.io")) {
+	if !bytes.Equal(b.Index("Lily@Vaultly.dev "), b.Index("lily@vaultly.dev")) {
 		t.Fatal("index must ignore case and surrounding spaces")
 	}
-	if bytes.Equal(b.Index("maya@acme.io"), b.Index("dev@acme.io")) {
+	if bytes.Equal(b.Index("lily@vaultly.dev"), b.Index("rose@vaultly.dev")) {
 		t.Fatal("different emails must differ")
 	}
-	if bytes.Equal(b.Index("maya@acme.io"), box().Index("maya@acme.io")) {
+	if bytes.Equal(b.Index("lily@vaultly.dev"), box().Index("lily@vaultly.dev")) {
 		t.Fatal("the index must depend on the secret key (otherwise it is a plain hash that can be brute-forced)")
 	}
 	if len(b.Index("x@y.z")) != 32 {
@@ -55,7 +55,7 @@ func TestBlindIndexIsStableCaseInsensitiveAndKeyed(t *testing.T) {
 
 func TestLabelSealsEmailsOnlyAndIsIdempotent(t *testing.T) {
 	b := box()
-	l := b.Label("maya@acme.io")
+	l := b.Label("lily@vaultly.dev")
 	if !Sealed(l) || b.Label(l) != l {
 		t.Fatalf("emails must be sealed exactly once: %q", l)
 	}
@@ -64,7 +64,7 @@ func TestLabelSealsEmailsOnlyAndIsIdempotent(t *testing.T) {
 			t.Errorf("%q must pass through unchanged", keep)
 		}
 	}
-	if b.OpenLabel(l) != "maya@acme.io" || b.OpenLabel("legacy@plain.io") != "legacy@plain.io" {
+	if b.OpenLabel(l) != "lily@vaultly.dev" || b.OpenLabel("legacy@plain.io") != "legacy@plain.io" {
 		t.Fatal("OpenLabel must decrypt sealed values and pass plaintext through")
 	}
 	if b.OpenLabel(box().Label("x@y.z")) != "[unreadable]" {
@@ -74,14 +74,14 @@ func TestLabelSealsEmailsOnlyAndIsIdempotent(t *testing.T) {
 
 func TestNamesAreSealedIdempotentAndLegacyPlaintextPasses(t *testing.T) {
 	b := box()
-	s := b.SealName("orgs.name", "Priya Nair's workspace")
-	if !Sealed(s) || strings.Contains(s, "Priya") {
+	s := b.SealName("orgs.name", "Rose Bennett's workspace")
+	if !Sealed(s) || strings.Contains(s, "Rose") {
 		t.Fatalf("name must be opaque: %q", s)
 	}
 	if b.SealName("orgs.name", s) != s {
 		t.Fatal("sealing an already sealed value must not double-encrypt")
 	}
-	if got := b.OpenName("orgs.name", s); got != "Priya Nair's workspace" {
+	if got := b.OpenName("orgs.name", s); got != "Rose Bennett's workspace" {
 		t.Fatalf("open: %q", got)
 	}
 	if got := b.OpenName("orgs.name", "legacy plaintext"); got != "legacy plaintext" {

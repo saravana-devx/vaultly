@@ -538,7 +538,7 @@ X-Vaultly-Timestamp: 1767225600
 X-Vaultly-Signature: v1=3b9f...
 
 { "id": "7f1c...", "event": "secret.update", "created_at": "...",
-  "project": "payments-api", "actor": "maya@acme.dev", "resource": "/stripe/API_KEY" }`}</Cmd>
+  "project": "payments-api", "actor": "lily@vaultly.dev", "resource": "/stripe/API_KEY" }`}</Cmd>
         <h2>Verify the signature</h2>
         <p>
           When you create a webhook, Vaultly shows its signing secret once. The

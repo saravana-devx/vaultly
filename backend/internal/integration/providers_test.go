@@ -44,7 +44,7 @@ func TestGitHubSealsSecretsForTheRepoKey(t *testing.T) {
 	defer srv.Close()
 
 	g := &GitHub{Client: srv.Client(), Base: srv.URL}
-	res, err := g.Push(context.Background(), map[string]string{"token": "ghp_test", "repo": "acme/api"},
+	res, err := g.Push(context.Background(), map[string]string{"token": "ghp_test", "repo": "vaultly/api"},
 		map[string]string{"db_url": "postgres://x", "STRIPE_KEY": "sk_1", "GITHUB_TOKEN": "nope", "bad-name": "x"})
 	if err != nil {
 		t.Fatal(err)

@@ -351,7 +351,7 @@ export function Register() {
           required
           autoFocus
           autoComplete="name"
-          placeholder="Maya Patel"
+          placeholder="Lily Morgan"
         />
       </Field>
       <Field label="Work email">
@@ -378,7 +378,7 @@ export function Register() {
         </div>
       </Field>
       <Field label="Workspace name" hint="Optional">
-        <input className="input" name="org" placeholder="Acme Inc." />
+        <input className="input" name="org" placeholder="Vaultly" />
       </Field>
     </Layout>
   );

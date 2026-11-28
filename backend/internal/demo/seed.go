@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	AdminEmail = "maya@demo.vaultly.dev"
-	DevEmail   = "sam@demo.vaultly.dev"
+	AdminEmail = "lily@demo.vaultly.dev"
+	DevEmail   = "rose@demo.vaultly.dev"
 	Password   = "demo-password-2026"
 )
 
@@ -89,19 +89,19 @@ type Result struct {
 func Seed(base string, logf func(string, ...any)) (*Result, error) {
 	base = strings.TrimRight(base, "/")
 	hc := &http.Client{Timeout: 20 * time.Second}
-	maya := &session{base: base, http: hc}
+	lily := &session{base: base, http: hc}
 	if err := waitHealthy(hc, base); err != nil {
 		return nil, err
 	}
-	if err := maya.auth("/auth/login", map[string]string{"email": AdminEmail, "password": Password}); err == nil {
+	if err := lily.auth("/auth/login", map[string]string{"email": AdminEmail, "password": Password}); err == nil {
 		return &Result{AlreadySeeded: true}, nil
 	}
 	logf("creating users")
-	if err := maya.auth("/auth/register", map[string]string{"name": "Maya Patel", "email": AdminEmail, "password": Password, "org_name": "Acme"}); err != nil {
+	if err := lily.auth("/auth/register", map[string]string{"name": "Lily Morgan", "email": AdminEmail, "password": Password, "org_name": "Vaultly"}); err != nil {
 		return nil, fmt.Errorf("register admin: %w", err)
 	}
-	sam := &session{base: base, http: hc}
-	if err := sam.auth("/auth/register", map[string]string{"name": "Sam Lee", "email": DevEmail, "password": Password}); err != nil {
+	rose := &session{base: base, http: hc}
+	if err := rose.auth("/auth/register", map[string]string{"name": "Rose Bennett", "email": DevEmail, "password": Password}); err != nil {
 		return nil, fmt.Errorf("register developer: %w", err)
 	}
 
@@ -109,11 +109,11 @@ func Seed(base string, logf func(string, ...any)) (*Result, error) {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
-	if err := maya.call("GET", "/orgs", nil, &orgs); err != nil || len(orgs) == 0 {
+	if err := lily.call("GET", "/orgs", nil, &orgs); err != nil || len(orgs) == 0 {
 		return nil, fmt.Errorf("list workspaces: %v", err)
 	}
 	org := orgs[0].ID
-	if err := maya.call("POST", "/orgs/"+org+"/members", map[string]string{"email": DevEmail, "role": "developer"}, nil); err != nil {
+	if err := lily.call("POST", "/orgs/"+org+"/members", map[string]string{"email": DevEmail, "role": "developer"}, nil); err != nil {
 		return nil, fmt.Errorf("add developer: %w", err)
 	}
 
@@ -126,7 +126,7 @@ func Seed(base string, logf func(string, ...any)) (*Result, error) {
 		ID           string `json:"id"`
 		Environments []env  `json:"environments"`
 	}
-	if err := maya.call("POST", "/orgs/"+org+"/projects", map[string]string{"name": "payments-api"}, &proj); err != nil {
+	if err := lily.call("POST", "/orgs/"+org+"/projects", map[string]string{"name": "payments-api"}, &proj); err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
 	put := func(s *session, envSlug, path, key, value, comment string) error {
@@ -153,22 +153,22 @@ func Seed(base string, logf func(string, ...any)) (*Result, error) {
 			if v == "" {
 				continue
 			}
-			if err := put(maya, envSlug, d.path, d.key, v, d.comment); err != nil {
+			if err := put(lily, envSlug, d.path, d.key, v, d.comment); err != nil {
 				return nil, fmt.Errorf("put %s %s: %w", envSlug, d.key, err)
 			}
 		}
 	}
 	// A second version, so History and Rollback have something to show.
-	if err := put(maya, "prod", "/", "LOG_LEVEL", "warn", "less noise in prod"); err != nil {
+	if err := put(lily, "prod", "/", "LOG_LEVEL", "warn", "less noise in prod"); err != nil {
 		return nil, err
 	}
 
 	var other struct{ ID string }
-	if err := maya.call("POST", "/orgs/"+org+"/projects", map[string]string{"name": "marketing-site"}, &other); err != nil {
+	if err := lily.call("POST", "/orgs/"+org+"/projects", map[string]string{"name": "marketing-site"}, &other); err != nil {
 		return nil, err
 	}
-	for k, v := range map[string]string{"NEXT_PUBLIC_API_URL": "https://api.acme.dev", "CMS_TOKEN": "cms_demo_token_123"} {
-		if err := maya.call("PUT", "/projects/"+other.ID+"/secrets", map[string]any{"env": "prod", "key": k, "value": v}, nil); err != nil {
+	for k, v := range map[string]string{"NEXT_PUBLIC_API_URL": "https://api.vaultly.dev", "CMS_TOKEN": "cms_demo_token_123"} {
+		if err := lily.call("PUT", "/projects/"+other.ID+"/secrets", map[string]any{"env": "prod", "key": k, "value": v}, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -176,13 +176,13 @@ func Seed(base string, logf func(string, ...any)) (*Result, error) {
 	logf("protecting production and opening a change request")
 	for _, e := range proj.Environments {
 		if e.Slug == "prod" {
-			if err := maya.call("PATCH", "/projects/"+proj.ID+"/environments/"+e.ID, map[string]bool{"protected": true}, nil); err != nil {
+			if err := lily.call("PATCH", "/projects/"+proj.ID+"/environments/"+e.ID, map[string]bool{"protected": true}, nil); err != nil {
 				return nil, fmt.Errorf("protect prod: %w", err)
 			}
 		}
 	}
-	// Sam (developer) proposes a production change: it waits for Maya's approval.
-	if err := put(sam, "prod", "/", "FEATURE_NEW_CHECKOUT", "true", "enable new checkout in prod"); err != nil {
+	// Rose (developer) proposes a production change: it waits for Lily's approval.
+	if err := put(rose, "prod", "/", "FEATURE_NEW_CHECKOUT", "true", "enable new checkout in prod"); err != nil {
 		return nil, fmt.Errorf("change request: %w", err) // 202 Accepted is success
 	}
 
@@ -190,7 +190,7 @@ func Seed(base string, logf func(string, ...any)) (*Result, error) {
 	var tok struct {
 		Token string `json:"token"`
 	}
-	if err := maya.call("POST", "/projects/"+proj.ID+"/tokens", map[string]any{"name": "demo-cli", "env": "prod", "path": "/", "expire_days": 30}, &tok); err != nil {
+	if err := lily.call("POST", "/projects/"+proj.ID+"/tokens", map[string]any{"name": "demo-cli", "env": "prod", "path": "/", "expire_days": 30}, &tok); err != nil {
 		return nil, fmt.Errorf("service token: %w", err)
 	}
 	return &Result{ServiceToken: tok.Token}, nil

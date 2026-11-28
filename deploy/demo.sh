@@ -44,13 +44,13 @@ cat <<EOF
   Vaultly is running.
 
   App        http://localhost:${APP_PORT:-3000}
-  Admin      maya@demo.vaultly.dev / demo-password-2026   (workspace "Acme")
-  Developer  sam@demo.vaultly.dev  / demo-password-2026   (has a change request waiting on prod)
+  Admin      lily@demo.vaultly.dev / demo-password-2026   (workspace "Vaultly")
+  Developer  rose@demo.vaultly.dev  / demo-password-2026   (has a change request waiting on prod)
   Mail       http://localhost:${MAIL_UI_PORT:-8025}
 
   Things to try
     - payments-api > Compare: drift between dev, staging and prod, without revealing values
-    - payments-api > Changes: approve Sam's production change as Maya
+    - payments-api > Changes: approve Rose's production change as Lily
     - Settings > Two-factor sign-in
 EOF
 if [ -n "$token" ]; then

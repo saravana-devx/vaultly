@@ -14,7 +14,7 @@ Self-hosted secrets management: encrypted storage, environments and folders, ver
 make demo        # only needs Docker: creates .env, starts the stack, seeds a demo workspace
 ```
 
-Then open http://localhost:3000 and sign in as `maya@demo.vaultly.dev` (admin) or `sam@demo.vaultly.dev` (developer), password `demo-password-2026`. Sam has a production change waiting for Maya's approval, and the **Compare** tab shows drift between environments.
+Then open http://localhost:3000 and sign in as `lily@demo.vaultly.dev` (admin) or `rose@demo.vaultly.dev` (developer), password `demo-password-2026`. Rose has a production change waiting for Lily's approval, and the **Compare** tab shows drift between environments.
 
 ## Run
 
