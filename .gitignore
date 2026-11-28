@@ -5,3 +5,6 @@ backend/bin
 
 .env.prod
 backups/
+
+# local diagram sources and exports (kept in Eraser)
+docs/diagrams/

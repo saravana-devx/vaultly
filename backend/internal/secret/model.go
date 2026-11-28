@@ -33,6 +33,7 @@ type Write struct {
 	Path, Key        string
 	Ciphertext       []byte
 	Comment          string
+	KeepComment      bool   // leave an existing secret's comment as it is (imports, machine writes without one)
 	Actor            string // already sealed
 	Action           string // create | update | rollback | rotate; empty = infer
 	Tags             *[]string

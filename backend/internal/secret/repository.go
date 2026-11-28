@@ -172,13 +172,16 @@ func (r *Repository) Upsert(ctx context.Context, w Write) (Secret, bool, error) 
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		var id uuid.UUID
 		var version int
-		var tagsRaw string
+		var tagsRaw, commentRaw string
 		var expires *time.Time
-		err := tx.QueryRow(ctx, `SELECT id, version, tags, expires_at FROM secrets WHERE env_id=$1 AND lookup_hash=$2 FOR UPDATE`,
-			w.EnvID, lookup).Scan(&id, &version, &tagsRaw, &expires)
+		err := tx.QueryRow(ctx, `SELECT id, version, tags, expires_at, comment FROM secrets WHERE env_id=$1 AND lookup_hash=$2 FOR UPDATE`,
+			w.EnvID, lookup).Scan(&id, &version, &tagsRaw, &expires, &commentRaw)
 		exists := !errors.Is(err, pgx.ErrNoRows)
 		if err != nil && exists {
 			return err
+		}
+		if exists && w.KeepComment {
+			w.Comment = r.box.OpenName(fComment, commentRaw)
 		}
 		tags := r.openTags(tagsRaw)
 		if w.Tags != nil {

@@ -28,12 +28,16 @@ type Repository struct {
 
 func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
 
-func (r *Repository) cidrs(raw string) []string {
+// cidrs opens a token's IP allowlist. An unreadable list is an error, never "no restriction".
+func (r *Repository) cidrs(raw string) ([]string, error) {
 	out := []string{}
-	if err := r.box.OpenJSON(fSvcCIDRs, raw, &out); err != nil || out == nil {
-		return []string{}
+	if err := r.box.OpenJSON(fSvcCIDRs, raw, &out); err != nil {
+		return nil, err
 	}
-	return out
+	if out == nil {
+		out = []string{}
+	}
+	return out, nil
 }
 
 func (r *Repository) ListService(ctx context.Context, projectID uuid.UUID) ([]ServiceView, error) {
@@ -51,7 +55,10 @@ func (r *Repository) ListService(ctx context.Context, projectID uuid.UUID) ([]Se
 			return nil, err
 		}
 		v.Name, v.Prefix = r.box.OpenName(fSvcName, v.Name), r.box.OpenName(fSvcPrefix, v.Prefix)
-		v.Env, v.Path, v.AllowedCIDRs = r.box.OpenName(fSlug, v.Env), r.box.OpenName(fSvcPath, v.Path), r.cidrs(cidrs)
+		v.Env, v.Path = r.box.OpenName(fSlug, v.Env), r.box.OpenName(fSvcPath, v.Path)
+		if v.AllowedCIDRs, err = r.cidrs(cidrs); err != nil {
+			v.AllowedCIDRs = []string{"[unreadable]"}
+		}
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -94,7 +101,10 @@ func (r *Repository) ServiceByHash(ctx context.Context, hash []byte) (*ServiceRe
 		return nil, err
 	}
 	t.EnvSlug, t.Name = r.box.OpenName(fSlug, t.EnvSlug), r.box.OpenName(fSvcName, t.Name)
-	t.PathPrefix, t.CIDRs = r.box.OpenName(fSvcPath, t.PathPrefix), r.cidrs(cidrs)
+	t.PathPrefix = r.box.OpenName(fSvcPath, t.PathPrefix)
+	if t.CIDRs, err = r.cidrs(cidrs); err != nil {
+		return nil, ErrInvalidToken // fail closed: an allowlist we cannot read must not allow every IP
+	}
 	return t, nil
 }
 

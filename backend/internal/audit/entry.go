@@ -27,6 +27,7 @@ type Page struct {
 
 type ListQuery struct {
 	Before    time.Time
+	BeforeID  *uuid.UUID // tie-breaker for events that share Before's timestamp
 	ProjectID *uuid.UUID
 	Kind      string // action prefix such as "secret" matches secret.create, secret.read, ...
 	Limit     int

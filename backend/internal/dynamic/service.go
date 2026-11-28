@@ -261,16 +261,26 @@ func (s *Service) Revoke(ctx context.Context, a principal.Actor, projectID, leas
 		return err
 	}
 	if err := s.revokeOne(ctx, leaseID, projectID); err != nil {
+		if _, ok := apperr.As(err); ok {
+			return err
+		}
 		return apperr.Upstream(err.Error())
 	}
 	s.audit.Record(ctx, a, p.OrgID, &projectID, "dynamic.revoke", leaseID.String(), nil)
 	return nil
 }
 
-// revokeOne drops one lease's credentials. projectID uuid.Nil skips the ownership check (system jobs).
+// revokeOne drops one lease's credentials. projectID uuid.Nil skips the ownership check (system jobs);
+// with a project, a lease that is not live in it is reported as not found instead of "revoked".
 func (s *Service) revokeOne(ctx context.Context, leaseID, projectID uuid.UUID) error {
 	t, err := s.repo.ActiveLease(ctx, leaseID)
-	if err != nil || t == nil || (projectID != uuid.Nil && t.ProjectID != projectID) {
+	if err != nil {
+		return err
+	}
+	if t == nil || (projectID != uuid.Nil && t.ProjectID != projectID) {
+		if projectID != uuid.Nil {
+			return ErrNotFound
+		}
 		return nil
 	}
 	dek, err := s.keys.ProjectKey(ctx, t.ProjectID)

@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 
@@ -165,6 +166,15 @@ func (s *Service) DeleteEnv(ctx context.Context, a principal.Actor, id, env uuid
 	p, err := s.access.Project(ctx, a.UserID, id, access.RoleAdmin)
 	if err != nil {
 		return err
+	}
+	// The environment id comes from the URL: make sure it belongs to this project before revoking
+	// its leases, or an admin of one project could drop another workspace's credentials.
+	envs, err := s.repo.EnvsFor(ctx, []uuid.UUID{id})
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(envs[id], func(e Env) bool { return e.ID == env }) {
+		return ErrEnvNotFound
 	}
 	s.leases.RevokeForEnv(ctx, env)
 	envSlug, err := s.repo.DeleteEnv(ctx, id, env)

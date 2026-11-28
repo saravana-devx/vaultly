@@ -2,7 +2,6 @@ package secret
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -350,7 +349,7 @@ func (s *Service) Import(ctx context.Context, a principal.Actor, projectID uuid.
 	path, ok := pathutil.Norm(req.Path)
 	envID, err := s.access.EnvID(ctx, projectID, req.Env)
 	if !ok || err != nil {
-		if err != nil && !errors.Is(err, access.ErrNotFound) {
+		if err != nil && !isNotFound(err) {
 			return nil, err
 		}
 		return nil, ErrInvalidEnvPath
@@ -369,7 +368,7 @@ func (s *Service) Import(ctx context.Context, a principal.Actor, projectID uuid.
 			res.Skipped++
 			continue
 		}
-		_, created, err := s.write(ctx, Write{ProjectID: projectID, EnvID: envID, Path: path, Key: kv[0], Actor: label}, kv[1])
+		_, created, err := s.write(ctx, Write{ProjectID: projectID, EnvID: envID, Path: path, Key: kv[0], KeepComment: true, Actor: label}, kv[1])
 		if err != nil {
 			return nil, err
 		}
@@ -391,7 +390,7 @@ func (s *Service) Export(ctx context.Context, a principal.Actor, projectID uuid.
 	path, ok := pathutil.Norm(q.Path)
 	envID, err := s.access.EnvID(ctx, projectID, q.Env)
 	if !ok || err != nil {
-		if err != nil && !errors.Is(err, access.ErrNotFound) {
+		if err != nil && !isNotFound(err) {
 			return nil, err
 		}
 		return nil, ErrInvalidEnvPath
@@ -436,7 +435,7 @@ func (s *Service) MachinePut(ctx context.Context, a principal.Actor, req *Machin
 		return nil, err
 	}
 	sec, created, err := s.write(ctx, Write{ProjectID: t.ProjectID, EnvID: t.EnvID, Path: path, Key: req.Key, Comment: req.Comment,
-		Actor: s.pii.Label(a.Label())}, req.Value)
+		KeepComment: req.Comment == "", Actor: s.pii.Label(a.Label())}, req.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -446,6 +445,13 @@ func (s *Service) MachinePut(ctx context.Context, a principal.Actor, req *Machin
 	}
 	s.audit.Record(ctx, a, t.OrgID, &t.ProjectID, action, pathutil.Join(path, req.Key), map[string]any{"version": sec.Version, "env": t.EnvSlug})
 	return &MachineWriteResult{Key: sec.Key, Path: sec.Path, Version: sec.Version}, nil
+}
+
+// isNotFound matches any not-found error; access.EnvID returns its own "environment not found",
+// which is a different value from access.ErrNotFound.
+func isNotFound(err error) bool {
+	ae, ok := apperr.As(err)
+	return ok && ae.Kind == apperr.KindNotFound
 }
 
 func tokenPath(t *principal.ServiceToken, requested string) (string, error) {
@@ -503,9 +509,12 @@ func (s *Service) collect(ctx context.Context, projectID, envID uuid.UUID, envSl
 }
 
 // Snapshot returns every live secret at path and below with references resolved, for system
-// jobs (integration sync) that act without a user or token.
+// jobs (integration sync) that act without a user or token. References resolve only inside the
+// same environment: otherwise anyone who can write a dev secret could reference
+// ${production:/KEY} and have the sync push the production value to the dev target.
 func (s *Service) Snapshot(ctx context.Context, projectID, envID uuid.UUID, envSlug, path string) (map[string]string, error) {
-	pairs, err := s.collect(ctx, projectID, envID, envSlug, path, true, true, nil)
+	allow := func(env, _ string) bool { return env == envSlug }
+	pairs, err := s.collect(ctx, projectID, envID, envSlug, path, true, true, allow)
 	if err != nil {
 		return nil, err
 	}

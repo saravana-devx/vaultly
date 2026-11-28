@@ -67,20 +67,60 @@ func (r *Repository) Add(ctx context.Context, org, user uuid.UUID, role string) 
 	return err
 }
 
-func (r *Repository) SetRole(ctx context.Context, org, user uuid.UUID, role string) error {
-	tag, err := r.db.Exec(ctx, `UPDATE memberships SET role=$3 WHERE org_id=$1 AND user_id=$2`, org, user, role)
+// keepsAnAdmin locks the workspace's admin rows and fails if user is its only admin. Holding the
+// lock until the transaction ends serialises concurrent demotions and removals, so two admins
+// cannot demote each other at the same time and leave the workspace with none.
+func keepsAnAdmin(ctx context.Context, tx pgx.Tx, org, user uuid.UUID) error {
+	rows, err := tx.Query(ctx, `SELECT user_id FROM memberships WHERE org_id=$1 AND role='admin' FOR UPDATE`, org)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrMemberNotFound
+	admins, isAdmin := 0, false
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		admins++
+		isAdmin = isAdmin || id == user
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if isAdmin && admins <= 1 {
+		return ErrLastAdmin
 	}
 	return nil
 }
 
+func (r *Repository) SetRole(ctx context.Context, org, user uuid.UUID, role string) error {
+	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if role != "admin" {
+			if err := keepsAnAdmin(ctx, tx, org, user); err != nil {
+				return err
+			}
+		}
+		tag, err := tx.Exec(ctx, `UPDATE memberships SET role=$3 WHERE org_id=$1 AND user_id=$2`, org, user, role)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrMemberNotFound
+		}
+		return nil
+	})
+}
+
 func (r *Repository) Remove(ctx context.Context, org, user uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM memberships WHERE org_id=$1 AND user_id=$2`, org, user)
-	return err
+	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := keepsAnAdmin(ctx, tx, org, user); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM memberships WHERE org_id=$1 AND user_id=$2`, org, user)
+		return err
+	})
 }
 
 // AdminInfo reports how many admins the workspace has and whether user is one of them.

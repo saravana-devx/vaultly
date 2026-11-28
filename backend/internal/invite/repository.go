@@ -19,12 +19,17 @@ type Repository struct {
 
 func NewRepository(db *pgxpool.Pool, box *pii.Box) *Repository { return &Repository{db: db, box: box} }
 
-func (r *Repository) roles(raw string) map[string]string {
+// roles opens an invitation's per-environment restrictions. An unreadable value is an error:
+// treating it as "no overrides" would give the invitee full access to every environment.
+func (r *Repository) roles(raw string) (map[string]string, error) {
 	out := map[string]string{}
-	if err := r.box.OpenJSON("invites.env_roles", raw, &out); err != nil || out == nil {
-		return map[string]string{}
+	if err := r.box.OpenJSON("invites.env_roles", raw, &out); err != nil {
+		return nil, err
 	}
-	return out
+	if out == nil {
+		out = map[string]string{}
+	}
+	return out, nil
 }
 
 func (r *Repository) IsMember(ctx context.Context, org uuid.UUID, emailHash []byte) (bool, error) {
@@ -66,7 +71,9 @@ func (r *Repository) ListPending(ctx context.Context, org uuid.UUID) ([]Invite, 
 		if err := rows.Scan(&i.ID, &i.EmailEnc, &i.Role, &roles, &i.InvitedBy, &i.ExpiresAt, &i.CreatedAt); err != nil {
 			return nil, err
 		}
-		i.EnvRoles = r.roles(roles)
+		if i.EnvRoles, err = r.roles(roles); err != nil {
+			i.EnvRoles = map[string]string{}
+		}
 		out = append(out, i)
 	}
 	return out, rows.Err()
@@ -91,8 +98,13 @@ func (r *Repository) ByTokenHash(ctx context.Context, hash []byte) (*Invite, err
 	if dberr.IsNoRows(err) {
 		return nil, ErrInviteNotFound
 	}
-	i.EnvRoles = r.roles(roles)
-	return i, err
+	if err != nil {
+		return nil, err
+	}
+	if i.EnvRoles, err = r.roles(roles); err != nil {
+		return nil, ErrInviteNotFound
+	}
+	return i, nil
 }
 
 // Accept creates the membership, applies the environment overrides and marks the invitation used.

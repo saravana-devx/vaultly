@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,7 +34,15 @@ func (r *Reader) List(ctx context.Context, a principal.Actor, org uuid.UUID, q L
 	}
 	args := []any{org, q.Before}
 	sql := `SELECT a.id, a.project_id, p.name, a.actor_type, a.actor_label, a.action, a.resource, a.metadata, a.ip, a.created_at
-		FROM audit_logs a LEFT JOIN projects p ON p.id = a.project_id WHERE a.org_id=$1 AND a.created_at < $2`
+		FROM audit_logs a LEFT JOIN projects p ON p.id = a.project_id WHERE a.org_id=$1`
+	if q.BeforeID != nil {
+		// Keyset on (created_at, id), matching the ORDER BY, so events that share the last
+		// timestamp of a page are not skipped.
+		args = append(args, *q.BeforeID)
+		sql += fmt.Sprintf(` AND (a.created_at, a.id) < ($2, $%d)`, len(args))
+	} else {
+		sql += ` AND a.created_at < $2`
+	}
 	if q.ProjectID != nil {
 		args = append(args, *q.ProjectID)
 		sql += fmt.Sprintf(` AND a.project_id = $%d`, len(args))
@@ -74,10 +83,14 @@ func (r *Reader) List(ctx context.Context, a principal.Actor, org uuid.UUID, q L
 	}
 	if len(page.Events) > q.Limit {
 		page.Events = page.Events[:q.Limit]
-		page.Next = page.Events[q.Limit-1].At.Format(time.RFC3339Nano)
+		last := page.Events[q.Limit-1]
+		page.Next = last.At.Format(time.RFC3339Nano) + cursorSep + last.ID.String()
 	}
 	return page, nil
 }
+
+// cursorSep joins the timestamp and id of a page's last event in Page.Next.
+const cursorSep = "~"
 
 // kindPattern keeps the ?kind= filter to plain action prefixes (letters and underscores only).
 var kindPattern = regexp.MustCompile(`^[a-z_]{1,32}$`)
@@ -92,8 +105,12 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 	q := ListQuery{Before: time.Now().Add(time.Minute), Limit: 50}
-	if t, err := time.Parse(time.RFC3339Nano, c.Query("before")); err == nil {
+	ts, idPart, hasID := strings.Cut(c.Query("before"), cursorSep)
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 		q.Before = t
+		if id, err := uuid.Parse(idPart); hasID && err == nil {
+			q.BeforeID = &id
+		}
 	}
 	if id, err := uuid.Parse(c.Query("project_id")); err == nil {
 		q.ProjectID = &id
